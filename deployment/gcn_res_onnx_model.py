@@ -37,6 +37,15 @@ def index_points(points: torch.Tensor, idx: torch.Tensor) -> torch.Tensor:
     return selected.reshape(*raw_size, -1)
 
 
+def standard_pairwise_euclidean_distance(
+    xyz1: torch.Tensor, xyz2: torch.Tensor
+) -> torch.Tensor:
+    """Compute p=2 pairwise distances with standard ONNX-expressible ops."""
+    coordinate_delta = xyz1.unsqueeze(2) - xyz2.unsqueeze(1)
+    squared_distance = torch.sum(coordinate_delta * coordinate_delta, dim=-1)
+    return torch.sqrt(squared_distance)
+
+
 class TransitionDownBlock(nn.Module):
     def __init__(self, in_dim: int, out_dim: int, grid_size: list[float]) -> None:
         super().__init__()
@@ -66,7 +75,7 @@ def interpolate(
     features2: torch.Tensor,
     k: int = 2,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    distances = torch.cdist(xyz1, xyz2, p=2)
+    distances = standard_pairwise_euclidean_distance(xyz1, xyz2)
     topk_results = torch.topk(distances, k=k, dim=2, largest=False)
     topk_weights = 1 / (topk_results.values + 1e-8)
     normalized_weights = topk_weights / topk_weights.sum(dim=2, keepdim=True)
@@ -174,7 +183,7 @@ class PointTransformerV2Block(nn.Module):
         self, points_xyz: torch.Tensor, points_features: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         residual = points_features.clone()
-        distances = torch.cdist(points_xyz, points_xyz)
+        distances = standard_pairwise_euclidean_distance(points_xyz, points_xyz)
         _, indices = torch.topk(distances, self.k, largest=False)
         neighbours_xyz = index_points(points_xyz, indices)
         out = self.linear_1(points_features)

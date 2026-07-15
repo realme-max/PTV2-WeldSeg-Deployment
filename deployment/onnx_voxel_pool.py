@@ -129,8 +129,12 @@ def standard_voxel_pool_with_metadata(
     feature_dim = points_features.shape[2]
     flat_features = points_features.reshape(-1, feature_dim)
     feature_index = inverse_global.unsqueeze(1).expand(-1, feature_dim)
-    pooled_features_all = torch.zeros(
+    # Each materialized unique voxel has at least one source point for every
+    # feature channel.  Negative infinity is therefore the exact amax identity
+    # when the target participates in the reduction.
+    pooled_features_all = torch.full(
         (total_voxels, feature_dim),
+        float("-inf"),
         device=points_features.device,
         dtype=points_features.dtype,
     ).scatter_reduce(
@@ -138,7 +142,7 @@ def standard_voxel_pool_with_metadata(
         feature_index,
         flat_features,
         reduce="amax",
-        include_self=False,
+        include_self=True,
     )
 
     voxel_count_per_batch = torch.zeros(
