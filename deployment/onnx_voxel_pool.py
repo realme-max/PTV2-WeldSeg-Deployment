@@ -101,10 +101,16 @@ def standard_voxel_pool_with_metadata(
         .expand(batch_size, points_per_batch)
         .reshape(-1)
     )
-    unique_batch_ids = torch.zeros(
-        total_voxels, device=points.device, dtype=torch.int64
+    # Every unique_global_keys entry is referenced by inverse_global at least
+    # once, so no materialized target voxel is empty.  int64 max is the exact
+    # +infinity identity for amin over the finite batch-ID domain [0, B-1].
+    unique_batch_ids = torch.full(
+        (total_voxels,),
+        torch.iinfo(torch.int64).max,
+        device=points.device,
+        dtype=torch.int64,
     ).scatter_reduce(
-        0, inverse_global, point_batch_ids, reduce="amin", include_self=False
+        0, inverse_global, point_batch_ids, reduce="amin", include_self=True
     )
     unique_local_keys = unique_global_keys - offsets.index_select(0, unique_batch_ids)
 
