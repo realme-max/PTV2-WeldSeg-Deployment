@@ -1,0 +1,22 @@
+seed: 42
+batch_size: 2
+epochs: 2
+num_point: 2048
+k_neighbors: 6
+learning_rate: 0.001
+weight_decay: 0.0001
+optimizer: Adam
+num_workers: 0
+device: cuda:0
+mode: from_scratch
+
+data_root: data/weld
+split_directory: train_test_split
+split_prefix: sub_shuffled
+checkpoint_path: models/testParameters/GCN_res/best_model.pth
+artifacts_root: artifacts/subdataset_smoke
+
+num_class: 2
+in_dim: 4
+pin_memory: true
+

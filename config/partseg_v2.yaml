@@ -1,0 +1,22 @@
+batch_size: 4
+epoch: 200
+learning_rate: 1e-3
+gpu: 0
+num_point: 2048
+optimizer: Adam
+weight_decay: 1e-4
+normal: False
+lr_decay: 0.5
+step_size: 20
+
+defaults:
+#   - model: Hengshuang
+  - model: Nico
+
+hydra:
+  run:
+    dir: log/partseg/${model.name}
+
+  sweep:
+    dir: log/partseg
+    subdir: ${model.name}
