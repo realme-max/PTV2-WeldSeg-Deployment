@@ -40,17 +40,43 @@ def jsonable(value: Any) -> Any:
     return value
 
 
+def iter_graphs(
+    graph: onnx.GraphProto, path: str = "main"
+) -> list[tuple[str, onnx.GraphProto]]:
+    graphs = [(path, graph)]
+    for node in graph.node:
+        for attribute in node.attribute:
+            if attribute.type == onnx.AttributeProto.GRAPH:
+                graphs.extend(
+                    iter_graphs(
+                        attribute.g,
+                        f"{path}/{node.name or node.op_type}:{attribute.name}",
+                    )
+                )
+            elif attribute.type == onnx.AttributeProto.GRAPHS:
+                for index, nested in enumerate(attribute.graphs):
+                    graphs.extend(
+                        iter_graphs(
+                            nested,
+                            f"{path}/{node.name or node.op_type}:{attribute.name}[{index}]",
+                        )
+                    )
+    return graphs
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--original-onnx", type=Path, required=True)
+    parser.add_argument("--parser-summary", default="parser_summary.json")
+    parser.add_argument("--report-name", default="parser_audit_report.md")
     args = parser.parse_args()
 
     run_dir = args.run_dir.resolve()
     original = args.original_onnx.resolve()
     rewritten = run_dir / "rewritten.onnx"
     replacement_path = run_dir / "replacement_summary.json"
-    parser_path = run_dir / "parser_summary.json"
+    parser_path = run_dir / args.parser_summary
     replacement = json.loads(replacement_path.read_text(encoding="utf-8"))
     parser_summary = json.loads(parser_path.read_text(encoding="utf-8"))
 
@@ -77,13 +103,53 @@ def main() -> int:
 
     model = onnx.load_model(str(rewritten), load_external_data=False)
     onnx.checker.check_model(model)
+    tensor_info: dict[str, dict[str, Any]] = {}
+    graph_records = iter_graphs(model.graph)
+    for _, graph in graph_records:
+        for value in (*graph.input, *graph.output, *graph.value_info):
+            tensor_type = value.type.tensor_type
+            shape: list[int | str] = []
+            if tensor_type.HasField("shape"):
+                for dimension in tensor_type.shape.dim:
+                    if dimension.HasField("dim_value"):
+                        shape.append(int(dimension.dim_value))
+                    elif dimension.HasField("dim_param"):
+                        shape.append(dimension.dim_param)
+                    else:
+                        shape.append("unknown")
+            tensor_info[value.name] = {
+                "name": value.name,
+                "dtype": onnx.TensorProto.DataType.Name(tensor_type.elem_type),
+                "shape": shape,
+            }
+        for initializer in graph.initializer:
+            tensor_info.setdefault(
+                initializer.name,
+                {
+                    "name": initializer.name,
+                    "dtype": onnx.TensorProto.DataType.Name(initializer.data_type),
+                    "shape": list(initializer.dims),
+                },
+            )
+    node_records = [
+        (scope, node)
+        for scope, graph in graph_records
+        for node in graph.node
+    ]
     first_error = parser_summary["errors"][0] if parser_summary["errors"] else None
     blocker_node = None
+    blocker_scope = None
     if first_error:
-        blocker_node = next(
-            (node for node in model.graph.node if node.name == first_error["node_name"]),
+        blocker_record = next(
+            (
+                (scope, node)
+                for scope, node in node_records
+                if node.name == first_error["node_name"]
+            ),
             None,
         )
+        if blocker_record:
+            blocker_scope, blocker_node = blocker_record
     blocker_attributes = (
         {
             attribute.name: jsonable(helper.get_attribute_value(attribute))
@@ -97,21 +163,65 @@ def main() -> int:
             "node_name": blocker_node.name,
             "op_type": blocker_node.op_type,
             "domain": blocker_node.domain or "ai.onnx",
-            "inputs": list(blocker_node.input),
-            "outputs": list(blocker_node.output),
+            "graph_scope": blocker_scope,
+            "inputs": [
+                tensor_info.get(name, {"name": name, "dtype": "UNKNOWN", "shape": []})
+                for name in blocker_node.input
+            ],
+            "outputs": [
+                tensor_info.get(name, {"name": name, "dtype": "UNKNOWN", "shape": []})
+                for name in blocker_node.output
+            ],
             "attributes": blocker_attributes,
         }
         if blocker_node is not None
         else None
     )
+    scatter_node = next(
+        (
+            node
+            for node in model.graph.node
+            if node.name == "/model/tdb_1/ScatterElements"
+        ),
+        None,
+    )
+    scatter_graph_evidence = None
+    if scatter_node is not None:
+        scatter_graph_evidence = {
+            "node_name": scatter_node.name,
+            "op_type": scatter_node.op_type,
+            "domain": scatter_node.domain or "ai.onnx",
+            "attributes": {
+                attribute.name: jsonable(helper.get_attribute_value(attribute))
+                for attribute in scatter_node.attribute
+            },
+            "inputs": [
+                tensor_info.get(name, {"name": name, "dtype": "UNKNOWN", "shape": []})
+                for name in scatter_node.input
+            ],
+            "outputs": [
+                tensor_info.get(name, {"name": name, "dtype": "UNKNOWN", "shape": []})
+                for name in scatter_node.output
+            ],
+            "parser_advanced_past_node": bool(
+                first_error and first_error["node_name"] != scatter_node.name
+            ),
+        }
 
     parser_passed = bool(parser_summary["parser_success"])
+    with_standard_plugins = "standard_plugins_initialized" in parser_summary
+    passed_status = (
+        "TENSORRT_GCN_RES_PLUGIN_PARSER_WITH_STANDARD_PLUGINS_PASSED"
+        if with_standard_plugins
+        else "TENSORRT_GCN_RES_PLUGIN_PARSER_PASSED"
+    )
+    failed_status = (
+        "TENSORRT_GCN_RES_PLUGIN_PARSER_WITH_STANDARD_PLUGINS_FAILED"
+        if with_standard_plugins
+        else "TENSORRT_GCN_RES_PLUGIN_PARSER_FAILED"
+    )
     parser_audit = {
-        "status": (
-            "TENSORRT_GCN_RES_PLUGIN_PARSER_PASSED"
-            if parser_passed
-            else "TENSORRT_GCN_RES_PLUGIN_PARSER_FAILED"
-        ),
+        "status": passed_status if parser_passed else failed_status,
         "parser_success": parser_passed,
         "parser_error_count": parser_summary["parser_error_count"],
         "plugin_creator_registered": parser_summary["plugin_creator_registered"],
@@ -121,6 +231,19 @@ def main() -> int:
         "plugin_creator_build_calls_before_stop": parser_summary[
             "plugin_creator_build_calls"
         ],
+        "standard_plugins_initialized": parser_summary.get(
+            "standard_plugins_initialized"
+        ),
+        "registry_creator_count_after_standard_init": parser_summary.get(
+            "registry_creator_count_after_standard_init"
+        ),
+        "scatter_reduction_creator_found": parser_summary.get(
+            "scatter_reduction_creator_found"
+        ),
+        "scatter_related_creators": parser_summary.get(
+            "scatter_related_creators", []
+        ),
+        "scatter_node_evidence": scatter_graph_evidence,
         "first_blocking_node": first_error["node_name"] if first_error else None,
         "first_blocking_operator": first_error["op_type"] if first_error else None,
         "first_blocking_error": first_error["description"] if first_error else None,
@@ -132,14 +255,19 @@ def main() -> int:
         "inference_called": False,
         "engine_artifacts": generated_engines,
     }
-    replacement["parser_audit"] = parser_audit
+    audit_key = (
+        "parser_with_standard_plugins_audit"
+        if "standard_plugins_initialized" in parser_summary
+        else "parser_audit"
+    )
+    replacement[audit_key] = parser_audit
     dump_json(replacement_path, replacement)
 
     if parser_passed:
-        conclusion = "TENSORRT_GCN_RES_PLUGIN_PARSER_PASSED"
+        conclusion = passed_status
         blocker_section = "No parser blocker was reported."
     else:
-        conclusion = "TENSORRT_GCN_RES_PLUGIN_PARSER_FAILED"
+        conclusion = failed_status
         blocker_section = f"""- Node: `{first_error['node_name']}`
 - Operator: `{first_error['op_type']}`
 - Error code: `{first_error['error_code']}`
@@ -168,6 +296,11 @@ scalar `voxel_count` size-tensor output.
 
 - Plugin Creator registered: {parser_summary['plugin_creator_registered']}
 - Plugin Creator lookup: {parser_summary['plugin_creator_lookup_passed']}
+- Standard plugins initialized: {parser_summary.get('standard_plugins_initialized', 'not recorded')}
+- Registry creators after standard initialization: {parser_summary.get('registry_creator_count_after_standard_init', 'not recorded')}
+- ScatterReduction Creator found: {parser_summary.get('scatter_reduction_creator_found', 'not recorded')}
+- Scatter-related Creators: {parser_summary.get('scatter_related_creators', [])}
+- Former blocker node evidence: {scatter_graph_evidence}
 - VoxelUnique instances created before parser stop: {parser_summary['plugin_creator_build_calls']}
 - Parser success: {parser_passed}
 - Parser errors: {parser_summary['parser_error_count']}
@@ -186,7 +319,7 @@ was attempted after this result.
 
 {conclusion}
 """
-    (run_dir / "parser_audit_report.md").write_text(report, encoding="utf-8")
+    (run_dir / args.report_name).write_text(report, encoding="utf-8")
     print(f"ORIGINAL_ONNX_UNCHANGED={original_hash == EXPECTED_ORIGINAL_SHA256}")
     print("ENGINE_BUILD_CALLED=false")
     print("INFERENCE_CALLED=false")
