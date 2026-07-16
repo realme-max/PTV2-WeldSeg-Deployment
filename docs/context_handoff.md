@@ -1,58 +1,57 @@
 # PTV2-WeldSeg-Deployment 项目交接
 
-更新日期：2026-07-15（Asia/Shanghai）
+更新时间：2026-07-16（Asia/Shanghai）
 
-## 1. 项目与最终模型
-
-目标链路：
-
-```text
-PyTorch → ONNX → TensorRT FP32 Engine → TensorRT Python parity → C++ GPU inference
-```
+## 1. 最终模型与任务
 
 - 项目：`E:\GRP-PTv2`
 - 模型：`models/testParameters/GCN_res/model.py`
 - checkpoint：`models/testParameters/GCN_res/best_model.pth`
-- 标签 0：`weld_seam`
-- 标签 1：`background`
+- class 0：`weld_seam`
+- class 1：`background`
 
 固定接口：
 
 ```text
-points: float32 [1, 2048, 4]
-adj:    float32 [1, 2048, 2048]
-logits: float32 [1, 2048, 2]
+points: FP32 [1, 2048, 4]
+adj:    FP32 [1, 2048, 2048]
+logits: FP32 [1, 2048, 2]
 ```
 
-测试基线：test mIoU 0.936309，weld F1 0.946799。
+固定评估基线：test mIoU `0.936309`，weld F1 `0.946799`。
 
 ## 2. PyTorch 与 deployment 状态
 
-deployment 模型：`deployment/gcn_res_onnx_model.py`
+deployment模型：`deployment/gcn_res_onnx_model.py`
 
 ```text
+CHECKPOINT_AND_FORWARD_VALIDATION_PASSED
 TRUNC_FLOOR_EQUIVALENCE_PASSED
 SCATTER_REDUCE_AMIN_EQUIVALENCE_PASSED
 SCATTER_REDUCE_AMAX_EQUIVALENCE_PASSED
 STANDARD_OPS_VOXEL_POOL_EQUIVALENCE_PASSED
 ```
 
-CUDA FP32 scatter reduction 存在非 bitwise 的归约顺序误差；最终 logits 最大绝对误差约 `2.503395e-06`，标签一致率 100%。
+CUDA FP32 scatter reduction存在非bitwise归约顺序误差；最终logits最大绝对误差
+约 `2.503395e-06`，标签一致率100%。
 
-## 3. ONNX 与 ORT 状态
+## 3. ONNX 与 ONNX Runtime
 
-现有 ONNX：
+原部署ONNX：
 
-`artifacts/gcn_res_onnx/20260715_onnx_after_cdist_fp32_opset18/gcn_res_deploy_fp32_opset18.onnx`
+```text
+artifacts/gcn_res_onnx/20260715_onnx_after_cdist_fp32_opset18/
+gcn_res_deploy_fp32_opset18.onnx
+```
 
 ```text
 GCN_RES_ONNX_EXPORT_PASSED
 ONNX graph validation: PASSED
 ```
 
-ORT CPU label agreement 为 100%，但 logits 未达到既定 allclose 容差。
+ORT CPU标签一致率100%，但logits未满足既定allclose容差。
 
-ORT CUDA 准确状态：
+ORT CUDA必须保留以下真实状态：
 
 ```text
 ONNXRUNTIME_CUDA_PARITY_NOT_COMPLETED
@@ -60,15 +59,10 @@ ORT_CUDA_PROFILING_NO_EVENTS_FLUSHED
 ORT_CUDA_EXTREME_LATENCY_REPRODUCED
 ```
 
-必须保留结论：
+CUDA EP推理出现可复现的极端延迟，因此ORT CUDA parity没有完成。不得把它写成
+已通过，也不要再次运行长时间ORT CUDA inference。
 
-```text
-ORT CUDA parity was not completed because CUDA EP inference showed reproducible extreme latency.
-```
-
-不得把 ORT CUDA parity 记为已通过，也不要再次运行长时间 ORT CUDA inference。
-
-## 4. 当前 Python/GPU/CUDA 环境
+## 4. 当前环境
 
 - 虚拟环境：`E:\GRP-PTv2\.venv_ptv2`
 - Python：3.11.8
@@ -77,94 +71,109 @@ ORT CUDA parity was not completed because CUDA EP inference showed reproducible 
 - cuDNN：9.7.1
 - onnxruntime-gpu：1.26.0
 - GPU：NVIDIA GeForce RTX 5060，SM 12.0
-- driver：610.74
-- CUDA Toolkit：12.8 Update 1
-- `nvcc`：V12.8.93
-- `CUDA_PATH`：`C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8`
-- `pip check`：No broken requirements found
+- Driver：610.74
+- CUDA Toolkit：12.8 Update 1，nvcc 12.8.93
+- CUDA_PATH：`C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8`
+- TensorRT SDK/Python：11.1.0.106
+- pip check：No broken requirements found
 
-PyTorch、ORT 和全部 PyG CUDA 扩展保持原锁定版本。
-
-## 5. TensorRT 环境
-
-TensorRT SDK 根目录：
+TensorRT SDK：
 
 ```text
 D:\NVIDIA_GeForce5060\TensorRT-11.1.0\TensorRT-11.1.0.106
 ```
 
-当前状态：
-
-```text
-TensorRT SDK: 11.1.0.106 Windows x64 CUDA 12
-TensorRT Python: 11.1.0.106
-trtexec: TensorRT v110100 build 106
-TENSORRT_PYTHON_BUILDER_AVAILABLE
-TENSORRT_ENVIRONMENT_READY
-```
-
-完整 SDK 已确认包含：
-
-- `bin/trtexec.exe`；
-- `include/NvInfer.h`；
-- `include/NvOnnxParser.h`；
-- `lib/nvinfer_11.lib`；
-- `lib/nvonnxparser_11.lib`；
-- `bin/nvinfer_11.dll`；
-- `bin/nvonnxparser_11.dll`；
-- `bin/nvinfer_builder_resource_sm120_11.dll`。
-
-Python binding 使用 SDK 自带 `cp311` wheel，以 `--no-deps` 安装；只新增 `tensorrt==11.1.0.106`，其他包未变化。
-
-TensorRT `bin` 没有永久加入 User/Machine PATH。每个新 PowerShell 在使用 TensorRT 前应执行：
+新终端使用TensorRT前临时设置：
 
 ```powershell
 $env:TENSORRT_ROOT = 'D:\NVIDIA_GeForce5060\TensorRT-11.1.0\TensorRT-11.1.0.106'
 $env:PATH = "$env:TENSORRT_ROOT\bin;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8\bin;$env:PATH"
 ```
 
-不设置该临时 PATH 时，Python import 会因找不到 `nvinfer_11.dll` 失败；设置后 import 和 Builder 已验证成功。
+C++/CUDA必须使用VS2022 x64工具链；普通PATH中还存在旧VS2015，不能使用。
 
-## 6. C++ 工具链
+## 5. TensorRT graph/parser进度
 
-- Visual Studio Community 2022 17.8.2；
-- Desktop development with C++：已安装；
-- MSVC x64 19.38.33130；
-- CMake 4.1.0。
+已完成：
 
-当前普通 PATH 的 `cl.exe` 优先命中旧 VS2015 x86。后续 C++ 构建必须使用 VS2022 Developer Command Prompt 或 `vcvars64.bat`。
+- `Unique`语义与TDB依赖审计；
+- IPluginV3 size tensor最小原型；
+- Custom ONNX → Plugin Creator → Parser链路；
+- `VoxelUniquePlugin`正确性测试；
+- 4个`ai.onnx::Unique`替换为
+  `com.tensorrt.ptv2::VoxelUnique`；
+- 标准`ScatterElements` Plugin注册；
+- 16个constant-false `If`等价性审计与折叠；
+- ONNX checker；
+- TensorRT Parser，0 errors。
 
-## 7. TensorRT Phase 1 Parser 结果
-
-TensorRT 11.1.0.106 Python Parser 已对现有 ONNX 完成只读解析：
+当前TensorRT部署ONNX：
 
 ```text
-TENSORRT_ONNX_PARSER_FAILED
-FIRST_BLOCKING_OPERATOR=Unique
-FIRST_BLOCKING_NODE=/model/tdb_1/Unique
+artifacts/gcn_res_tensorrt/20260715_213934_180785_if_folded/if_folded.onnx
 ```
 
-Parser 共报告 4 个 `UNSUPPORTED_NODE`：
+SHA-256：
 
-- `/model/tdb_1/Unique`，ONNX node 153；
-- `/model/tdb_2/Unique`，ONNX node 495；
-- `/model/tdb_3/Unique`，ONNX node 869；
-- `/model/tdb_4/Unique`，ONNX node 1243。
+```text
+f0ca962b4e46e7495d40c7f23387c8dffbd4ca88e580452408f2fd9da85bc5ba
+```
 
-两个输入已正确识别为 `points [1,2048,4]` 和 `adj [1,2048,2048]`，但 parser 未完成，network output 数为 0。没有创建 builder config，没有构建 Engine，没有运行 inference。
+## 6. TensorRT Phase 4结果
 
-`trtexec` 11.1 没有真正的 parser-only 参数；`--skipInference` 仍会先构建 Engine，因此本阶段只保存 `trtexec --help`，没有用它加载 ONNX。
+Phase 4 Parser再次通过，四个`VoxelUnique` BUILD实例均创建成功，但FP32 Engine
+构建失败：
+
+```text
+TENSORRT_FP32_ENGINE_BUILD_FAILED
+```
+
+首个TensorRT原生错误：
+
+```text
+convertExplicitDDSPluginToImplicit.cpp:149
+Error Code 2: Internal Error
+Assertion nodeIdxToDDSOutputIndices.count(i) ==
+          nodeIdxToSizeTensors.count(i) failed
+```
+
+判断：
+
+- 与`VoxelUnique`运行时长度/size tensor集成直接相关；
+- 属于DDS/shape-tensor转换阶段；
+- 不是Parser回归；
+- 没有证据指向ScatterElements；
+- 不是workspace不足，因此没有8 GiB重试；
+- 尚未进入tactic失败；
+- 没有SM120 kernel/capability错误。
 
 运行目录：
 
-`artifacts/gcn_res_tensorrt/20260715_164224_298664_parser_audit/`
+```text
+artifacts/gcn_res_tensorrt/20260716_171437_360317_fp32_engine_build/
+```
 
-详细报告：`docs/tensorrt_phase1_parser_audit.md`
+完整报告：`docs/tensorrt_phase4_fp32_engine_build.md`
 
-## 8. 下一步唯一入口
+## 7. 当前严格状态
 
-在任何 Engine build 之前，先对四个 ONNX `Unique` 的排序、inverse mapping、counts 和下游依赖做数学语义审计。禁止直接删除或绕过 voxel key 去重；只有标准算子等价实现完成逐层验证后，才允许重新导出 ONNX 并再次执行 Parser。
+```text
+Parser: PASSED (0 errors)
+FP32 Engine build: FAILED
+Serialized engine: NOT GENERATED
+Engine deserialization: NOT RUN
+Engine I/O validation: NOT RUN
+Engine Inspector: NOT RUN
+TensorRT inference: NOT RUN
+TensorRT parity: NOT RUN
+```
 
-当前仍禁止 TensorRT Engine build、TensorRT inference、FP16 和 benchmark；没有修改 ONNX、模型、checkpoint、数据或容差。
+不得写成`TENSORRT_FP32_ENGINE_BUILD_PASSED`或TensorRT inference/parity已通过。
 
-环境记录：`docs/tensorrt_phase0_parser_build_audit.md`
+## 8. 唯一下一步
+
+在重新构建Engine前，先审计TensorRT 11.1 IPluginV3多输出DDS协议与
+`declareSizeTensor()`映射，确认 `voxel_count`、`unique_values[M]`、
+`inverse_indices[N]` 三个输出的size tensor表达是否满足Builder要求。
+
+当前禁止直接重试、增加workspace、执行TensorRT inference、FP16、INT8或benchmark。
