@@ -60,11 +60,19 @@ Full benchmark values:
 - [x] Standard-operator voxel pooling replacement
 - [x] `trunc -> floor` definition-domain equivalence validation
 - [x] ONNX wrapper and export preparation
-- [ ] ONNX Runtime parity completion
-- [ ] TensorRT engine
+- [x] ONNX Runtime parity investigation and deployment graph validation
+- [x] TensorRT strict-FP32 production baseline qualification
 - [ ] C++ inference
 
-The ONNX export path is actively being completed. No unfinished TensorRT engine or runtime binary is included in this repository.
+The current production baseline uses the CUB-optimized `VoxelUniqueCub` plugin. It passed 18-sample task-equivalence, 10/10 cold starts, 5000/5000 soak inference, and fail-closed negative tests. Generated engines and binaries remain excluded from Git.
+
+Production entry points:
+
+- `scripts/run_gcn_res_tensorrt_production.py`
+- `deployment/tensorrt/current_baseline.json`
+- `docs/tensorrt_production_runbook.md`
+
+The promoted baseline is task-equivalent but retains an explicit strict numerical exception: 13/18 samples meet per-sample `max_abs < 1e-4`; labels and task metrics match 18/18.
 
 ## Validated Environment
 
@@ -114,6 +122,8 @@ Start with:
 - `docs/partseg_checkpoint_benchmark.md`
 - `docs/gcn_res_onnx_export_validation.md`
 - `docs/trunc_floor_equivalence.md`
+- `docs/tensorrt_phase8d_production_baseline.md`
+- `docs/tensorrt_production_runbook.md`
 
 ## Data and Weights
 

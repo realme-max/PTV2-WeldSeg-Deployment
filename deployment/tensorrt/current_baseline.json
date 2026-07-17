@@ -1,0 +1,9 @@
+{
+  "deployment_id": "gcn-res-trt-cub-strict-fp32-20260717_173128_144483",
+  "manifest_path": "E:\\GRP-PTv2\\artifacts\\gcn_res_tensorrt\\20260717_173128_144483_phase8d_production_baseline\\package\\manifests\\deployment_manifest.json",
+  "manifest_sha256": "3995732e8dfd5e0c04659ce654edd8e7bd19d42ba10aeccd0b3b6797dd67b0f7",
+  "selected_at": "2026-07-17T19:38:25.554022+08:00",
+  "selection_mode": "explicit_manifest_switch",
+  "manifest_type": "production",
+  "artifacts_moved_or_deleted": false
+}

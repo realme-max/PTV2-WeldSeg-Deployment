@@ -549,4 +549,35 @@ TENSORRT_CUB_PLUGIN_OPTIMIZATION_CONFIRMED
 TENSORRT_CUB_END_TO_END_ACCELERATION_CONFIRMED
 ```
 
+## 17. Phase 8D: Production baseline qualification
+
+Formal artifacts: `artifacts/gcn_res_tensorrt/20260717_173128_144483_phase8d_production_baseline/`.
+
+```text
+TENSORRT_CUB_PRODUCTION_QUALIFICATION_PASSED_WITH_NUMERICAL_EXCEPTION
+TENSORRT_CUB_STRICT_FP32_TASK_EQUIVALENT_BASELINE_PROMOTED
+CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED
+```
+
+Key evidence:
+
+- Candidate Engine SHA-256: `a624601c63e99689fb67a6066ce8a6e346bc42dfa2a885e0f83c74f0ca742299`.
+- CUB Plugin SHA-256: `6641ec147e8eac10206a5c60ba1c1390c398d4b59e32a6a618a37046360ec348`.
+- Cold start: 10/10 independent processes passed; four plugin instances and zero ErrorRecorder errors each.
+- Full regression: 18/18 runtime and 100% candidate/PyTorch/baseline label agreement; all task metric deltas are zero.
+- Strict numerical threshold remains 13/18; worst `weld_14`, max abs `1.2302398681640625e-4`.
+- Three-round aggregate: candidate pure `4.8209 ms`, E2E `7.8194 ms`; `8.5348x` vs old TensorRT pure, `4.3514x` vs PyTorch pure, and `3.0514x` vs PyTorch host-to-host E2E.
+- No candidate sample was slower than PyTorch pure.
+- Determinism: `DETERMINISTIC_LABELS_ONLY`; labels stable, logits max repeated-run difference `7.8678131103515625e-6`.
+- Soak: 5000/5000 passed, finite outputs/reference labels, zero ErrorRecorder errors, no monotonic memory growth or obvious latency degradation.
+- Negative paths: 8/8 fail closed with no inference or fallback.
+- Package checksums and final default-mode production inference passed.
+
+The active pointer is `deployment/tensorrt/current_baseline.json`. The old baseline Engine/Plugin remain untouched and rollback is an explicit manifest switch only. No FP16, INT8, C++ integration, model/ONNX/plugin-algorithm change, robot integration, or safety-threshold change was performed.
+
+Detailed references:
+
+- `docs/tensorrt_phase8d_production_baseline.md`
+- `docs/tensorrt_production_runbook.md`
+
 详细报告：`docs/tensorrt_phase8c_candidate_engine_regression.md`。候选尚未替换正式 Engine；下一步需单独授权，且本阶段未执行 FP16、INT8 或 C++ 集成。
