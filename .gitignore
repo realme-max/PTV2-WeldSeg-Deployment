@@ -19,6 +19,7 @@ ENV/
 data/
 dataset/
 *.txt
+!deployment/tensorrt_runtime/CMakeLists.txt
 
 # Checkpoints and training weights
 *.pth

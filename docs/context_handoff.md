@@ -581,3 +581,26 @@ Detailed references:
 - `docs/tensorrt_production_runbook.md`
 
 详细报告：`docs/tensorrt_phase8c_candidate_engine_regression.md`。候选尚未替换正式 Engine；下一步需单独授权，且本阶段未执行 FP16、INT8 或 C++ 集成。
+
+## 18. Phase 9A: C++ TensorRT Runtime started and completed
+
+Phase 9A started from the promoted deployment `gcn-res-trt-cub-strict-fp32-20260717_173128_144483` and completed a Windows C++17 minimal runtime without changing or rebuilding the checkpoint, ONNX, Engine, Plugin algorithm, Builder configuration, or Python production runner.
+
+- Source: `deployment/tensorrt_runtime/`.
+- Validation orchestrator: `scripts/validate_gcn_res_tensorrt_cpp_runtime.py`.
+- Final validation artifacts: `artifacts/gcn_res_tensorrt/20260717_212521_216041_phase9a_cpp_runtime/`.
+- Visual Studio 2022 x64 Release build: PASS (`MSVC 19.38.33130.0`, CUDA Toolkit `12.8.93`, TensorRT `11.1.0.106`).
+- Production Engine SHA-256: `a624601c63e99689fb67a6066ce8a6e346bc42dfa2a885e0f83c74f0ca742299`.
+- Production Plugin SHA-256: `6641ec147e8eac10206a5c60ba1c1390c398d4b59e32a6a618a37046360ec348`.
+- Engine deserialize, context creation, fixed I/O validation, four runtime Plugin instances, CUDA buffers, `setTensorAddress`, `enqueueV3`, D2H, finite output, and zero ErrorRecorder errors: PASS.
+- `weld_65` Python TensorRT vs C++: max abs `3.5762786865234375e-6`, 2048/2048 labels equal, mIoU/F1 delta zero.
+- Phase 9A functional timing: CUDA Event mean `5.0713 ms`, host E2E mean `8.2245 ms` after 100 warmup and across 100 iterations; this is not a replacement for the Phase 8D benchmark.
+- Five fail-closed cases passed: missing Engine, missing Plugin, invalid Plugin exports, wrong Engine hash, and wrong input byte count. No fallback exists.
+
+The Phase 8D numerical exception remains explicit: `CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED`. Phase 9A confirms C++/Python TensorRT task-level equality for the fixed sample only; it does not claim strict Engine/PyTorch numerical equivalence.
+
+```text
+TENSORRT_CPP_RUNTIME_MINIMAL_INFERENCE_COMPLETED
+```
+
+Detailed report: `docs/tensorrt_phase9a_cpp_runtime.md`. Stop here; Qt, PCL, Robot, GUI, FP16, INT8, concurrency, and Phase 9B are not started.
