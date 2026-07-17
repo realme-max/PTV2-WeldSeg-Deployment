@@ -25,12 +25,20 @@ add_subdirectory(
     "${CMAKE_CURRENT_BINARY_DIR}/pointcloud_pipeline"
 )
 add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../postprocess"
+    "${CMAKE_CURRENT_BINARY_DIR}/postprocess"
+)
+add_subdirectory(
     "${CMAKE_CURRENT_SOURCE_DIR}/../tensorrt_runtime"
     "${CMAKE_CURRENT_BINARY_DIR}/tensorrt_runtime"
 )
 
 add_executable(weld_trt_demo src/main.cpp)
-target_link_libraries(weld_trt_demo PRIVATE ptv2_pointcloud_pipeline ptv2_tensorrt_runtime)
+target_link_libraries(weld_trt_demo PRIVATE
+    ptv2_pointcloud_pipeline
+    ptv2_postprocess
+    ptv2_tensorrt_runtime
+)
 if(MSVC)
     target_compile_options(weld_trt_demo PRIVATE /W4 /WX /utf-8)
 endif()

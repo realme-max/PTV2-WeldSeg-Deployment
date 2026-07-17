@@ -630,3 +630,27 @@ CPP_POINTCLOUD_PIPELINE_COMPLETED
 ```
 
 Detailed report: `docs/tensorrt_phase9b_cpp_pointcloud_pipeline.md`.
+
+## 20. Phase 9C: C++ segmentation post-processing completed
+
+Phase 9C added `deployment/postprocess/` and extended `weld_trt_demo` from raw-logits output to weld task results. The checkpoint, ONNX, production Engine, VoxelUnique CUB Plugin, TensorRT Runtime core, and Builder configuration remained unchanged.
+
+- New stages: finite/shape validation, class-0 weld argmax extraction, stable softmax confidence, original sampled-coordinate recovery, AABB/centroid, FP64 covariance plus PCA projection length, JSON/ASCII-PLY/prediction-TXT writing.
+- Validation: `scripts/validate_gcn_res_tensorrt_cpp_postprocess.py`.
+- Successful artifacts: `artifacts/gcn_res_tensorrt/20260717_221445_024382_phase9c_cpp_postprocess/`.
+- Visual Studio 2022 x64 Release: PASS; `weld_trt_demo.exe` and `postprocess_failure_probe.exe` built.
+- Required outputs: `result/weld_result.json`, `result/weld_points.ply`, and `result/prediction.txt` all generated.
+- `weld_65`: 209 predicted weld points, ratio `0.10205078125`, PCA length `57.19605255126953 mm`.
+- Phase 9B vs Phase 9C labels: 2048/2048 equal; Python argmax vs C++ labels: 2048/2048 equal.
+- Python/C++ FP32 geometry contract: weld count equal and ratio/center/bbox/PCA-length maximum error `0.0` (`<1e-5`).
+- Coordinate recovery max error `4.999999987e-7` (`<1e-6`); PLY contains 209 class-0 points.
+- Five post-processing failure cases passed with nonzero exits and no fallback: empty logits, wrong logits size, NaN logits, no weld points, and unusable output directory.
+- Phase 9B legacy `--output prediction.txt` compatibility regression remained PASS.
+
+The FP32 output-contract comparison is explicit: the independent FP64 reference and its FP32 quantization are both retained in the parity artifact. No tolerance was relaxed. The Phase 8D exception `CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED` remains in force.
+
+```text
+CPP_POSTPROCESS_PIPELINE_COMPLETED
+```
+
+Detailed report: `docs/tensorrt_phase9c_postprocess.md`. Stop here; Qt, PCL visualization, Robot integration, FP16, INT8, and CUDA post-processing are not started.

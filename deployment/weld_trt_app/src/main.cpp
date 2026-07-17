@@ -2,7 +2,11 @@
 #include "KnnGraphBuilder.h"
 #include "PointCloudLoader.h"
 #include "PointSampler.h"
+#include "CoordinateRecovery.h"
+#include "ResultWriter.h"
+#include "SegmentationPostProcessor.h"
 #include "TensorRTInference.h"
+#include "WeldGeometryExtractor.h"
 
 #include <algorithm>
 #include <chrono>
@@ -85,8 +89,12 @@ Arguments parseArguments(int argc, char** argv)
     args.plugin = required("--plugin");
     args.output = required("--output");
     std::filesystem::path const outputPath(args.output);
+    bool const legacyPredictionPath = outputPath.extension() == ".txt";
+    std::filesystem::path outputDirectory = legacyPredictionPath
+        ? outputPath.parent_path() : outputPath;
+    if (outputDirectory.empty()) outputDirectory = std::filesystem::current_path();
     args.report = values.count("--report") != 0
-        ? values["--report"] : (outputPath.parent_path() / "runtime_report.json").string();
+        ? values["--report"] : (outputDirectory / "runtime_report.json").string();
     if (values.count("--engine-sha256") != 0) args.engineSha256 = values["--engine-sha256"];
     if (values.count("--logits-output") != 0) args.logitsOutput = values["--logits-output"];
     if (values.count("--points-output") != 0) args.pointsOutput = values["--points-output"];
@@ -108,22 +116,17 @@ void writeBinary(std::string const& path, std::vector<T> const& values)
     if (!output) throw std::runtime_error("Failed to write binary output: " + path);
 }
 
-void writePredictions(
-    std::string const& path,
-    std::vector<ptv2::pointcloud::PointXYZL> const& sampled,
-    std::vector<float> const& logits)
+std::filesystem::path resultDirectory(Arguments const& args)
 {
-    std::filesystem::path const file(path);
-    if (!file.parent_path().empty()) std::filesystem::create_directories(file.parent_path());
-    std::ofstream output(file, std::ios::trunc);
-    output << std::setprecision(std::numeric_limits<float>::max_digits10);
-    for (std::size_t index = 0; index < sampled.size(); ++index)
-    {
-        int const prediction = logits[index * 2U] >= logits[index * 2U + 1U] ? 0 : 1;
-        auto const& point = sampled[index];
-        output << point.x << ' ' << point.y << ' ' << point.z << ' ' << prediction << '\n';
-    }
-    if (!output) throw std::runtime_error("Failed to write prediction TXT: " + path);
+    std::filesystem::path const requested(args.output);
+    if (requested.extension() != ".txt") return requested;
+    return requested.parent_path().empty() ? std::filesystem::current_path() : requested.parent_path();
+}
+
+std::filesystem::path predictionPath(Arguments const& args)
+{
+    std::filesystem::path const requested(args.output);
+    return requested.extension() == ".txt" ? requested : requested / "prediction.txt";
 }
 
 void writeReport(
@@ -131,7 +134,9 @@ void writeReport(
     ptv2::pointcloud::PointCloudStats const& stats,
     ptv2::pointcloud::NormalizationStats const& normalization,
     ptv2::runtime::TensorRTInference const& runtime,
+    ptv2::postprocess::WeldGeometryResult const& geometry,
     double loadMs, double sampleMs, double featureMs, double knnMs, double inferenceWallMs,
+    double postprocessMs,
     std::vector<float> const& logits)
 {
     std::filesystem::path const file(args.report);
@@ -158,6 +163,10 @@ void writeReport(
            << "  \"knn_ms\": " << knnMs << ",\n"
            << "  \"inference_ms\": " << runtime.lastInferenceDeviceMs() << ",\n"
            << "  \"inference_wall_ms\": " << inferenceWallMs << ",\n"
+           << "  \"postprocess_ms\": " << postprocessMs << ",\n"
+           << "  \"weld_points\": " << geometry.weldPoints << ",\n"
+           << "  \"weld_ratio\": " << geometry.weldRatio << ",\n"
+           << "  \"weld_length_mm\": " << geometry.lengthMm << ",\n"
            << "  \"runtime_plugin_instances\": " << runtime.runtimePluginInstances() << ",\n"
            << "  \"error_recorder_errors\": " << runtime.errorRecorderErrors() << ",\n"
            << "  \"engine_sha256\": \"" << runtime.engineSha256() << "\",\n"
@@ -210,20 +219,50 @@ int main(int argc, char** argv)
         if (!std::all_of(logits.begin(), logits.end(), [](float item) { return std::isfinite(item); }))
             throw std::runtime_error("TensorRT logits contain NaN/Inf");
 
-        writePredictions(args.output, sampled, logits);
+        started = Clock::now();
+        ptv2::postprocess::CoordinateRecovery coordinateRecovery;
+        std::vector<ptv2::pointcloud::PointXYZL> recovered;
+        if (!coordinateRecovery.recover(sampled, recovered))
+            throw std::runtime_error(coordinateRecovery.lastError());
+
+        ptv2::postprocess::SegmentationPostProcessor postProcessor;
+        std::vector<ptv2::postprocess::SegmentationPoint> segmentation;
+        if (!postProcessor.process(recovered, logits, segmentation))
+            throw std::runtime_error(postProcessor.lastError());
+
+        ptv2::postprocess::WeldGeometryExtractor geometryExtractor;
+        ptv2::postprocess::WeldGeometryResult geometry;
+        if (!geometryExtractor.extract(segmentation, geometry))
+            throw std::runtime_error(geometryExtractor.lastError());
+
+        ptv2::postprocess::ResultWriter resultWriter;
+        std::filesystem::path const outputDirectory = resultDirectory(args);
+        if (!resultWriter.write(
+                outputDirectory,
+                std::filesystem::path(args.cloud).stem().string(),
+                segmentation,
+                geometry,
+                runtime.lastInferenceDeviceMs(),
+                predictionPath(args)))
+        {
+            throw std::runtime_error(resultWriter.lastError());
+        }
+        double const postprocessMs = elapsedMs(started);
+
         writeBinary(args.logitsOutput, logits);
         writeBinary(args.pointsOutput, features);
         writeBinary(args.adjOutput, adjacency);
         std::vector<std::uint64_t> indices64(sampleIndices.begin(), sampleIndices.end());
         writeBinary(args.sampleIndicesOutput, indices64);
-        writeReport(args, loader.stats(), featureBuilder.normalization(), runtime,
-            loadMs, sampleMs, featureMs, knnMs, inferenceWallMs, logits);
-        std::cout << "CPP_POINTCLOUD_PIPELINE_INFERENCE_PASSED\n";
+        writeReport(args, loader.stats(), featureBuilder.normalization(), runtime, geometry,
+            loadMs, sampleMs, featureMs, knnMs, inferenceWallMs, postprocessMs, logits);
+        std::cout << "CPP_POINTCLOUD_PIPELINE_INFERENCE_PASSED\n"
+                  << "CPP_POSTPROCESS_PIPELINE_COMPLETED\n";
         return 0;
     }
     catch (std::exception const& error)
     {
-        std::cerr << "CPP_POINTCLOUD_PIPELINE_FAILED: " << error.what() << '\n';
+        std::cerr << "CPP_POSTPROCESS_PIPELINE_FAILED: " << error.what() << '\n';
         return 1;
     }
 }

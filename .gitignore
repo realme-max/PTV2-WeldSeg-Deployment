@@ -21,6 +21,7 @@ dataset/
 *.txt
 !deployment/tensorrt_runtime/CMakeLists.txt
 !deployment/pointcloud_pipeline/CMakeLists.txt
+!deployment/postprocess/CMakeLists.txt
 !deployment/weld_trt_app/CMakeLists.txt
 
 # Checkpoints and training weights
