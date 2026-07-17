@@ -254,15 +254,50 @@ agreement `>= 99.99%` 的验收条件。关闭 TF32 后，原 FP32 Engine 的
 TENSORRT_STRICT_FP32_PARITY_PASSED
 ```
 
-## 9. 当前停止线与下一步
+## 9. Phase 6：Strict FP32 全 test split 验证
 
-Phase 5E 已完成 Strict FP32 单样本推理和 PyTorch parity。本轮按要求停止，不进入：
+执行脚本：
+
+`scripts/validate_gcn_res_tensorrt_strict_fp32_multisample.py`
+
+产物：
+
+`artifacts/gcn_res_tensorrt/20260717_110500_836041_strict_fp32_multisample/`
+
+固定 test split 的18个样本均完成 PyTorch CUDA 和 TensorRT Strict FP32 推理。每个样本
+均使用 seed 42 的固定2048点采样、相同归一化结果和相同 `k=6` 邻接矩阵。两套 logits
+已逐样本保存。
+
+- TensorRT Runtime/ErrorRecorder：PASS，`0` errors；
+- 所有输出有限；
+- 18/18 样本 point-wise label agreement 均为 `100%`；
+- cosine 条件 18/18 通过，最差为 `0.999999999979929`；
+- `max_abs_error < 1e-4` 条件 13/18 通过；
+- 超限样本：`weld_5`、`weld_12`、`weld_14`、`weld_4`、`weld_15`；
+- 最差样本：`weld_14`，max abs `1.230239868164e-04`；
+- 每样本 max abs 平均值：`8.540683322483e-05`；
+- 聚合 PyTorch/TensorRT mIoU 均为 `0.936308797729`；
+- 聚合 PyTorch/TensorRT weld seam F1 均为 `0.946799161766`；
+- mIoU/F1 绝对差均为 `0`；
+- Engine、ONNX、Plugin、checkpoint 的执行前后 SHA-256 一致。
+
+由于5个样本超过预先规定的 logits 最大绝对误差条件，未调整容差，最终状态为：
+
+```text
+TENSORRT_STRICT_FP32_MULTISAMPLE_VALIDATION_FAILED
+```
+
+详细报告：`docs/tensorrt_phase6_multisample_validation.md`。
+
+## 10. 当前停止线与下一步
+
+Phase 6 已完成全 test split 正确性验证。本轮按要求停止，不进入：
 
 - FP16 / INT8；
 - benchmark 或 kernel 优化；
 - C++ 部署；
 - 修改 ONNX、Plugin、checkpoint、模型、graph rewrite 或验收阈值。
 
-需要注意：当前 max absolute error 虽通过 `1e-4`，但距离阈值较近。若后续获得授权，
-应先在既有固定样本集合上复核 Strict FP32 parity，再决定是否将该 Engine 作为正式部署
-基线；该复核不属于本轮执行范围。
+当前分类输出和聚合指标完全一致，但 Strict FP32 Engine 未通过逐样本 logits
+`max_abs_error < 1e-4` 的完整验收。若后续获得授权，应先对5个超限样本的残余误差做
+只读归因，再决定部署验收策略；不得在未分析前调整阈值或进入低精度/正式部署阶段。
