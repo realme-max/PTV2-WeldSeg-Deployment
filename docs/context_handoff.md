@@ -604,3 +604,29 @@ TENSORRT_CPP_RUNTIME_MINIMAL_INFERENCE_COMPLETED
 ```
 
 Detailed report: `docs/tensorrt_phase9a_cpp_runtime.md`. Stop here; Qt, PCL, Robot, GUI, FP16, INT8, concurrency, and Phase 9B are not started.
+
+## 19. Phase 9B: C++ point-cloud preprocessing pipeline completed
+
+Phase 9B added a standalone C++17 CPU preprocessing library and connected raw weld TXT input to the existing Phase 9A TensorRT Runtime. No checkpoint, ONNX, Engine, Plugin implementation, Builder configuration, or Python TensorRT runtime was modified or rebuilt.
+
+- Sources: `deployment/pointcloud_pipeline/` and `deployment/weld_trt_app/`.
+- Validation orchestrator: `scripts/validate_gcn_res_tensorrt_cpp_pointcloud_pipeline.py`.
+- Final validation artifacts: `artifacts/gcn_res_tensorrt/20260717_215224_557179_phase9b_cpp_pointcloud_pipeline/`.
+- Visual Studio 2022 x64 Release C++17 build: PASS.
+- Raw input `data/weld/000001/weld_65.txt`: 2048 valid `x y z label` rows.
+- Deterministic sampling: `std::mt19937(seed=42)`, without replacement; repeat indices exact.
+- C++ output contracts: points FP32 `[1,2048,4]`, adjacency FP32 `[1,2048,2048]`, logits FP32 `[1,2048,2]`.
+- C++ points vs independent Python NumPy reference: exact, max abs `0.0`.
+- C++ adjacency vs independent sklearn reference: exact, zero mismatches.
+- Python TensorRT vs C++ TensorRT: max abs `3.0994415283203125e-6`, 2048/2048 labels equal, mIoU and weld-seam F1 deltas zero.
+- Runtime output finite, four Plugin instances, and zero ErrorRecorder errors.
+- Six fail-closed cases passed with nonzero exits and no fallback: missing TXT, fewer than 2048 points, malformed TXT, NaN coordinate, missing Engine, and missing Plugin.
+- Production Engine and Plugin SHA-256 remained `a624601c63e99689fb67a6066ce8a6e346bc42dfa2a885e0f83c74f0ca742299` and `6641ec147e8eac10206a5c60ba1c1390c398d4b59e32a6a618a37046360ec348`.
+
+The Phase 8D exception remains explicit: `CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED`. This phase does not claim strict Engine/PyTorch numerical equivalence and does not enter Qt, PCL visualization, Robot integration, CUDA KNN, FP16, or INT8.
+
+```text
+CPP_POINTCLOUD_PIPELINE_COMPLETED
+```
+
+Detailed report: `docs/tensorrt_phase9b_cpp_pointcloud_pipeline.md`.
