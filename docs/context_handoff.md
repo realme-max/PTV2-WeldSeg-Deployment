@@ -289,15 +289,124 @@ TENSORRT_STRICT_FP32_MULTISAMPLE_VALIDATION_FAILED
 
 详细报告：`docs/tensorrt_phase6_multisample_validation.md`。
 
-## 10. 当前停止线与下一步
+## 10. Phase 6B：Strict FP32 残余误差归因
 
-Phase 6 已完成全 test split 正确性验证。本轮按要求停止，不进入：
+执行脚本：
+
+`scripts/attribute_gcn_res_tensorrt_strict_fp32_residual_error.py`
+
+产物：
+
+`artifacts/gcn_res_tensorrt/20260717_113127_107178_residual_error_attribution/`
+
+分析样本为 `weld_14`、`weld_5`、`weld_12`。正式 Engine 未标记任何 debug tensor，
+因此使用同一只读 ONNX、Plugin、4 GiB workspace 和相同 Strict-FP32 策略，在内存中
+构建不落盘诊断 Engine，将19个主要 stage tensor临时暴露为输出。正式 Engine、ONNX、
+Plugin、checkpoint 与正式 Builder 配置均未修改。
+
+主要结论：
+
+- 三个样本的 `stem_linear` 均 bitwise 一致；
+- 三个样本的首个分叉和首个正向误差放大均为 `ptb_0`；
+- `ptb_0` max abs 为 `7.7486e-06 ~ 9.3877e-06`；
+- `gcn_0` 随后稳定将误差放大约 `2.7061e-05 ~ 2.9027e-05`；
+- transition-down 不是首个误差来源，且多个down stage会降低max error；
+- 最差样本 `weld_14` 的最大单级放大发生在 `ptb_8`，delta
+  `3.564357758e-05`；
+- 三样本全局最大单级放大发生在 `weld_5` 的 `segmentation_head_input`，delta
+  `4.351139069e-05`；
+- 诊断/正式 TensorRT logits max abs 仅为 `2.861e-06 ~ 5.245e-06`，标签一致率
+  均为100%，说明临时输出导致的 tactic扰动远小于待归因残差；
+- 正式 TensorRT/PyTorch logits max abs 为 `1.1158e-04 ~ 1.2207e-04`。
+
+归因：残余 Strict-FP32 差异起源于 `ptb_0`，随后由 `gcn_0` 和decoder/head阶段累计、
+放大；证据不支持 VoxelUnique 或 transition-down pooling 是首个来源。本轮没有进一步
+展开 `ptb_0` 内部算子，也没有修复。
+
+```text
+RESIDUAL_ERROR_ATTRIBUTION_COMPLETED
+```
+
+## 11. Phase 7A：Engine Benchmark Preparation
+
+新增脚本：
+
+`scripts/smoke_test_gcn_res_tensorrt_engine.py`
+
+成功产物：
+
+`artifacts/gcn_res_tensorrt/20260717_115222_307208_phase7a_engine_prepare/`
+
+正式 Strict FP32 Engine 已完成只读 metadata/Inspector 检查和一次 Runtime smoke：
+
+- Engine SHA-256：`b76563580089bbc0684e7a8e1edda6028c2d89fd91397c22b4efbd89ecd7fc2c`；
+- TensorRT `11.1.0.106`、CUDA Runtime `12.8`、RTX 5060 SM `12.0`；
+- Inspector layer count `570`，optimization profile `1`；
+- 恰好 4 个 `PluginV3 / VoxelUnique` 层，runtime plugin instance count 也为 `4`；
+- I/O 为 points FP32 `[1,2048,4]`、adj FP32 `[1,2048,2048]`、logits FP32
+  `[1,2048,2]`；
+- 固定 test 样本 `weld_65` 的 points/adj/sample indices 哈希与 Phase 6 完全一致；
+- Engine deserialize、context creation、单次 `enqueueV3` 均 PASS；
+- logits 全部有限，ErrorRecorder errors `0`；
+- Engine、ONNX、Plugin DLL、Plugin 源码与 checkpoint 在执行前后均未变化；
+- `pip check` 无冲突。
+
+本阶段没有 warmup、重复推理、计时、显存采样、parity、accuracy 或 Engine build。
+
+```text
+ENGINE_BENCHMARK_PREPARATION_COMPLETED
+```
+
+详细报告：`docs/tensorrt_phase7a_engine_preparation.md`。
+
+## 12. Phase 7B：Latency Benchmark
+
+新增脚本：
+
+- `scripts/benchmark_gcn_res_pytorch_latency.py`
+- `scripts/benchmark_gcn_res_tensorrt_latency.py`
+
+产物：
+
+`artifacts/gcn_res_tensorrt/20260717_122000_phase7b_latency_benchmark/`
+
+固定 `weld_65`、points `[1,2048,4]`、adj `[1,2048,2048]`，输入哈希与 Phase 7A
+完全一致。PyTorch 和 TensorRT 分别在独立进程中完成100次warmup和1000次正式测试。
+
+| Runtime | Mean ms | P50 ms | P95 ms | P99 ms |
+|---|---:|---:|---:|---:|
+| PyTorch CUDA forward | `20.7122` | `20.4034` | `23.1942` | `24.9172` |
+| TensorRT pure enqueue | `37.0643` | `37.0274` | `38.2124` | `38.8241` |
+| TensorRT pageable-host E2E | `39.6064` | `39.5497` | `40.6932` | `41.4386` |
+
+以 `PyTorch mean / TensorRT mean` 定义 speedup：pure 为 `0.558817x`，E2E 为
+`0.522950x`。当前 Strict FP32 TensorRT pure latency 比 PyTorch 高 `78.95%`，没有
+取得加速。
+
+显存口径：PyTorch allocator benchmark peak allocated `170,183,680` bytes、peak
+reserved `190,840,832` bytes；TensorRT 隔离进程 `cudaMemGetInfo` 生命周期快照相对
+基线最大观测增量 `383,778,816` bytes。后者不是 kernel 内部瞬时 peak。
+
+Engine、ONNX、Plugin、checkpoint 和 Plugin 源码执行前后均未变化；TensorRT
+ErrorRecorder 为0，输出有限，未执行 accuracy regression。
+
+```text
+TENSORRT_LATENCY_BENCHMARK_COMPLETED
+```
+
+详细报告：`docs/tensorrt_phase7b_latency_benchmark.md`。
+
+## 13. 当前停止线与下一步
+
+Phase 7B 已完成 latency 和规定的显存记录。本轮按要求停止，不进入：
 
 - FP16 / INT8；
-- benchmark 或 kernel 优化；
+- accuracy regression；
+- Plugin、kernel、tactic、图或 Builder 性能优化；
 - C++ 部署；
-- 修改 ONNX、Plugin、checkpoint、模型、graph rewrite 或验收阈值。
+- 修改或重建 Engine、ONNX、Plugin、checkpoint 或 deployment 模型。
 
-当前分类输出和聚合指标完全一致，但 Strict FP32 Engine 未通过逐样本 logits
-`max_abs_error < 1e-4` 的完整验收。若后续获得授权，应先对5个超限样本的残余误差做
-只读归因，再决定部署验收策略；不得在未分析前调整阈值或进入低精度/正式部署阶段。
+当前首个性能结论是：TensorRT Strict FP32 pure enqueue 慢于 PyTorch CUDA forward。
+若后续获得授权，应先做只读 TensorRT layer profiling / Plugin latency attribution，定位
+动态 DDS、VoxelUnique、Scatter 或其他 layer 的耗时占比，再决定优化方向；不得在没有
+profiling 证据前直接修改 Plugin 或模型图。
