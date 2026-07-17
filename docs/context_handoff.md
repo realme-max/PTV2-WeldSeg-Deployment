@@ -1,5 +1,35 @@
 # PTV2-WeldSeg-Deployment 项目交接
 
+## Phase 8B：VoxelUnique CUB 隔离优化（2026-07-17）
+
+新增独立实验 Plugin `com.tensorrt.ptv2.experimental::VoxelUniqueCub` version 1，位于
+`deployment/tensorrt_voxel_unique_plugin_cub/`。实现使用 CUB signed-INT64 radix sort pairs、run
+boundary、inclusive scan 和 inverse scatter；最大 TensorRT workspace 为 `49,920 bytes`，`enqueue()`
+内没有动态 CUDA 分配、host round-trip 或同步。
+
+独立 correctness Engine 的 21 个 case 全部通过；count、values、inverse 和 DDS runtime shape 同时与
+C++ CPU reference 及 `torch.unique(sorted=True, return_inverse=True)` 完全一致。
+
+| Input | Baseline kernel mean | CUB kernel mean | Speedup |
+|---|---:|---:|---:|
+| random keys | `37.258966 ms` | `0.117754 ms` | `316.41x` |
+| weld_65 tdb_1 keys | `28.847813 ms` | `0.103627 ms` | `278.38x` |
+
+真实 key 已满足 `<5 ms` 与至少 `5x` 两个门槛。实验产物位于
+`artifacts/gcn_res_tensorrt/20260717_151544_915303_phase8b_voxelunique_cub/`。正式 ONNX、Strict FP32
+Engine、baseline Plugin DLL 和 checkpoint 的冻结 SHA-256 均未变化。
+
+本阶段按要求停止，没有接入正式图、重建正式 Engine、执行 18 样本 parity、全模型 benchmark、
+FP16/INT8 或 C++ 应用部署。下一步需单独授权 Phase 8C candidate 集成和完整回归。
+
+详细报告：`docs/tensorrt_phase8b_voxelunique_cub.md`。
+
+```text
+VOXEL_UNIQUE_CUB_CORRECTNESS_PASSED
+VOXEL_UNIQUE_CUB_BENCHMARK_PASSED
+VOXELUNIQUE_CUB_ISOLATED_OPTIMIZATION_COMPLETED
+```
+
 更新时间：2026-07-16（Asia/Shanghai）
 
 ## 1. 最终模型与接口
@@ -396,17 +426,127 @@ TENSORRT_LATENCY_BENCHMARK_COMPLETED
 
 详细报告：`docs/tensorrt_phase7b_latency_benchmark.md`。
 
-## 13. 当前停止线与下一步
+## 13. Phase 7C：TensorRT Layer Profiling
 
-Phase 7B 已完成 latency 和规定的显存记录。本轮按要求停止，不进入：
+新增脚本：
 
+`scripts/profile_gcn_res_tensorrt_engine.py`
+
+正式产物：
+
+`artifacts/gcn_res_tensorrt/20260717_131821_006323_phase7c_profiling/`
+
+使用固定 `weld_65` 和 Phase 7A/7B 相同输入哈希，执行100次无profiler warmup，再挂载
+TensorRT `IProfiler`执行100次profile。输入常驻device，profile不含H2D/D2H。
+
+主要结果：
+
+- IProfiler平均layer time总和：`39.582810 ms/inference`；
+- 570/570 Engine layers精确关联Inspector，callback共57,000次；
+- Top1 `/model/tdb_1/Unique`：`30.222106 ms`、`76.351594%`；
+- Top2 `/model/tdb_2/Unique`：`1.389235 ms`、`3.509693%`；
+- 4个VoxelUnique合计：`31.669531 ms`、`80.008294%`；
+- GEMM：`2.151586 ms`、`5.435657%`；
+- Scatter/Gather合计：`0.766100 ms`、`1.935437%`；
+- DynamicShape含Plugin：`83.766661%`；扣除VoxelUnique后为`3.758368%`；
+- 86个GEMM均为Float，TF32 GEMM为0，全Inspector没有Half datatype；
+- 530/570层平均小于0.05 ms，存在次要的碎片化/launch开销，但不改变Plugin主导结论。
+
+瓶颈分类为 `C. dynamic shape overhead`，更精确地说是前两级、尤其tdb_1的
+runtime-size VoxelUnique Plugin execution。现有证据不支持GEMM compute、Scatter/Gather
+memory access或一般shape-copy是主要瓶颈。
+
+```text
+TENSORRT_PERFORMANCE_PROFILING_COMPLETED
+```
+
+详细报告：`docs/tensorrt_phase7c_performance_profiling.md`。
+
+## 14. Phase 8A：VoxelUnique Baseline Analysis
+
+新增脚本：
+
+- `scripts/profile_voxelunique_kernel.py`
+- `scripts/benchmark_voxelunique_plugin.py`
+
+产物：
+
+`artifacts/gcn_res_tensorrt/20260717_133149_811270_phase8a_voxelunique/`
+
+复用既有单VoxelUnique correctness Engine，不构建新Engine、不经过完整PTV2。随机N=2048
+key（M=499）和真实`weld_65/tdb_1` key（M=397）均执行100次warmup和1000次CUDA
+Event分段测量。
+
+| Input | Plugin execution mean | Copy mean | Total mean |
+|---|---:|---:|---:|
+| random | `37.258966 ms` | `0.190753 ms` | `37.449719 ms` |
+| weld_65 tdb_1 | `28.847813 ms` | `0.189470 ms` | `29.037282 ms` |
+
+当前CUDA源码为一个block/一个thread，串行去重、插入排序和inverse lookup，总复杂度
+`O(N·M + M²)`。每次enqueue只有一个kernel，无atomic、CPU fallback或Plugin内部global
+synchronize。真实隔离kernel与Phase 7C完整Engine tdb_1的`30.222106 ms`接近，确认
+Plugin串行算法是主因，约0.19ms的数据复制不是瓶颈。
+
+当前正确性证据覆盖随机N=4/8/32/2048和全部要求边界，18/18通过。优先优化建议为
+CUB radix sort pairs + boundary flags + scan + inverse scatter；GPU hash因sorted=True仍需
+排序，不作为第一选择；block-local fusion作为后备。
+
+本轮按“不要立即重写”约束只完成分析，`optimized_profile.json`为`NOT_RUN`，没有修改或
+重编译Plugin，也没有执行正式TensorRT回归。
+
+```text
+VOXELUNIQUE_ANALYSIS_COMPLETED
+```
+
+详细报告：
+
+- `docs/voxelunique_kernel_analysis.md`
+- `docs/tensorrt_phase8a_voxelunique_optimization.md`
+
+## 15. 当前停止线与下一步
+
+Phase 8A baseline分析已完成。本轮停止，不进入：
+
+- CUDA kernel改写或Plugin重编译；
+- 正式Engine重建；
+- Parser/runtime/parity/latency回归；
 - FP16 / INT8；
-- accuracy regression；
-- Plugin、kernel、tactic、图或 Builder 性能优化；
-- C++ 部署；
-- 修改或重建 Engine、ONNX、Plugin、checkpoint 或 deployment 模型。
+- C++部署或其他模型优化。
 
-当前首个性能结论是：TensorRT Strict FP32 pure enqueue 慢于 PyTorch CUDA forward。
-若后续获得授权，应先做只读 TensorRT layer profiling / Plugin latency attribution，定位
-动态 DDS、VoxelUnique、Scatter 或其他 layer 的耗时占比，再决定优化方向；不得在没有
-profiling 证据前直接修改 Plugin 或模型图。
+若后续明确授权Phase 8B，应在新源码和新DLL路径实现CUB版本，保留当前baseline DLL，
+先通过完整correctness矩阵，再做isolated benchmark；只有两者通过后才允许构建candidate
+Strict FP32 Engine并执行18样本回归。
+
+## 16. Phase 8C：VoxelUniqueCub 候选 Engine 集成与回归
+
+正式对象保持不变，所有候选文件位于：
+
+`artifacts/gcn_res_tensorrt/20260717_155708_684630_phase8c_candidate_engine/`
+
+候选 Strict FP32 Engine SHA-256 为 `a624601c63e99689fb67a6066ce8a6e346bc42dfa2a885e0f83c74f0ca742299`。TensorRT Parser、Builder、deserialize、`weld_65` runtime smoke 均 PASS；Inspector 为 574 层、4 个 `PluginV3 / VoxelUniqueCub`，TF32/FP16/INT8 均关闭。
+
+正确性结论：
+
+- `weld_65/5/12/14 × tdb_1~4` 的 count/values/inverse/runtime shape：16/16 完全一致；
+- 固定 test split runtime：18/18；
+- 候选与基线 TensorRT 标签及任务指标：完全一致；
+- 候选与 PyTorch 标签一致率：18/18 均 100%；
+- 原严格阈值未放宽：13/18 的 max abs `<1e-4`，最差 `weld_14 = 1.206398010254e-4`，因此保留 `CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED`。
+
+完整模型 latency（`weld_65`，100 warmup，1000 measurement）：
+
+- PyTorch CUDA：20.412148 ms；
+- baseline TensorRT pure/E2E：37.199287 / 40.029700 ms；
+- candidate TensorRT pure/E2E：4.701311 / 7.599190 ms；
+- candidate 相对 baseline：7.9125× pure、5.2676× E2E；
+- candidate 相对 PyTorch：4.3418× pure、2.6861× E2E。
+
+IProfiler 显示 4 个 Plugin 总耗时从 31.669531 ms 降至 0.137512 ms，`tdb_1` 从 30.222106 ms 降至 0.045858 ms。Plugin 占比从 80.0083% 降至 1.8262%；新的主要特征是 540/574 个层低于 0.05 ms 的碎片化 kernel launch/执行开销。
+
+```text
+VOXELUNIQUE_CUB_CANDIDATE_ENGINE_REGRESSION_COMPLETED
+TENSORRT_CUB_PLUGIN_OPTIMIZATION_CONFIRMED
+TENSORRT_CUB_END_TO_END_ACCELERATION_CONFIRMED
+```
+
+详细报告：`docs/tensorrt_phase8c_candidate_engine_regression.md`。候选尚未替换正式 Engine；下一步需单独授权，且本阶段未执行 FP16、INT8 或 C++ 集成。
