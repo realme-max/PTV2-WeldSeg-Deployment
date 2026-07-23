@@ -23,11 +23,11 @@ find_file(CUDART_RUNTIME_DLL
     REQUIRED
 )
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Test)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets OpenGL Test)
 if(NOT DEFINED QT_VERSION_MAJOR)
     set(QT_VERSION_MAJOR 5)
 endif()
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Test)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets OpenGL Test)
 
 add_subdirectory(
     "${CMAKE_CURRENT_SOURCE_DIR}/../pointcloud_pipeline"
@@ -50,15 +50,22 @@ add_library(ptv2_weld_qt_frontend STATIC
     include/MainWindow.h
     include/WeldDetectionWorker.h
     include/QtWeldResultViewModel.h
+    include/PointCloudRenderData.h
+    include/PointCloudCamera.h
+    include/PointCloudView.h
     src/MainWindow.cpp
     src/WeldDetectionWorker.cpp
     src/QtWeldResultViewModel.cpp
+    src/PointCloudRenderData.cpp
+    src/PointCloudCamera.cpp
+    src/PointCloudView.cpp
 )
 target_include_directories(ptv2_weld_qt_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(ptv2_weld_qt_frontend
     PUBLIC
         ptv2_weld_sdk
         Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::OpenGL
 )
 target_compile_definitions(ptv2_weld_qt_frontend PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 
@@ -68,6 +75,7 @@ target_link_libraries(ptv2_weld_qt_smoke
         ptv2_weld_qt_frontend
         ptv2_weld_sdk
         Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::OpenGL
 )
 
 add_executable(QtSdkIntegrationSmoke tests/QtSdkIntegrationSmoke.cpp)
@@ -77,15 +85,40 @@ target_link_libraries(QtSdkIntegrationSmoke
         ptv2_weld_sdk
         Qt${QT_VERSION_MAJOR}::Widgets
         Qt${QT_VERSION_MAJOR}::Test
+        Qt${QT_VERSION_MAJOR}::OpenGL
+)
+
+add_executable(PointCloudRenderDataTest tests/PointCloudRenderDataTest.cpp)
+target_link_libraries(PointCloudRenderDataTest
+    PRIVATE
+        ptv2_weld_qt_frontend
+        ptv2_weld_sdk
+        Qt${QT_VERSION_MAJOR}::Test
+)
+
+add_executable(PointCloudViewSmokeTest tests/PointCloudViewSmokeTest.cpp)
+target_link_libraries(PointCloudViewSmokeTest
+    PRIVATE
+        ptv2_weld_qt_frontend
+        ptv2_weld_sdk
+        Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::OpenGL
+        Qt${QT_VERSION_MAJOR}::Test
 )
 
 if(MSVC)
     target_compile_options(ptv2_weld_qt_frontend PRIVATE /W4 /WX /utf-8)
     target_compile_options(ptv2_weld_qt_smoke PRIVATE /W4 /WX /utf-8)
     target_compile_options(QtSdkIntegrationSmoke PRIVATE /W4 /WX /utf-8)
+    target_compile_options(PointCloudRenderDataTest PRIVATE /W4 /WX /utf-8)
+    target_compile_options(PointCloudViewSmokeTest PRIVATE /W4 /WX /utf-8)
 endif()
 
-foreach(runtime_target ptv2_weld_qt_smoke QtSdkIntegrationSmoke)
+foreach(runtime_target
+    ptv2_weld_qt_smoke
+    QtSdkIntegrationSmoke
+    PointCloudRenderDataTest
+    PointCloudViewSmokeTest)
     add_custom_command(TARGET ${runtime_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${TENSORRT_ROOT}/bin/nvinfer_11.dll"
@@ -116,5 +149,21 @@ if(DEFINED PTV2_TEST_ENGINE
             --cloud "${PTV2_TEST_CLOUD}"
             --small-cloud "${PTV2_TEST_SMALL_CLOUD}"
             --artifact-dir "${PTV2_TEST_ARTIFACT_DIR}"
+    )
+    add_test(
+        NAME PointCloudRenderDataTest
+        COMMAND PointCloudRenderDataTest
+            --engine "${PTV2_TEST_ENGINE}"
+            --plugin "${PTV2_TEST_PLUGIN}"
+            --cloud "${PTV2_TEST_CLOUD}"
+            --output "${PTV2_TEST_ARTIFACT_DIR}/render_data_test.json"
+    )
+    add_test(
+        NAME PointCloudViewSmokeTest
+        COMMAND PointCloudViewSmokeTest
+            --engine "${PTV2_TEST_ENGINE}"
+            --plugin "${PTV2_TEST_PLUGIN}"
+            --cloud "${PTV2_TEST_CLOUD}"
+            --output "${PTV2_TEST_ARTIFACT_DIR}/opengl_widget_smoke.json"
     )
 endif()

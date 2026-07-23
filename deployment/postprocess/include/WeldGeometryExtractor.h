@@ -17,6 +17,7 @@ struct WeldGeometryResult
     std::array<float, 3> center{};
     std::array<float, 3> bboxMin{};
     std::array<float, 3> bboxMax{};
+    std::array<float, 3> principalDirection{};
     float lengthMm{};
 };
 

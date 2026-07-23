@@ -729,3 +729,28 @@ PHASE_10A_QT_SDK_INTEGRATION_SMOKE_COMPLETED
 ```
 
 Detailed report: `docs/tensorrt_phase10a_qt_sdk_smoke.md`.
+
+## 23. Phase 10B: Qt point-cloud visualization completed
+
+- Evidence:
+  `artifacts/gcn_res_tensorrt/20260723_161213_760000_phase10b_qt_pointcloud_visualization/`.
+- QOpenGLWidget/QOpenGLFunctions, no PCL/VTK or internal deployment access.
+- OpenGL 3.3.0 NVIDIA 610.74 / RTX 5060; shader PASS; GL error 0.
+- Counts: 2048 total, 209 weld_seam and 1839 background.
+- Actual postprocess PCA direction is public and used; Qt does not recompute it.
+- Rotate/zoom/pan/reset, bbox/centroid/PCA, second refresh and shutdown: PASS.
+- CTest 3/3; visualization fail-closed 6/6: PASS.
+- Phase 9D regression PASS; geometry max error `4.2578125203363015e-7`.
+- Engine/Plugin hashes unchanged:
+  `a624601c63e99689fb67a6066ce8a6e346bc42dfa2a885e0f83c74f0ca742299`
+  and `6641ec147e8eac10206a5c60ba1c1390c398d4b59e32a6a618a37046360ec348`.
+
+The SDK extension copies already-computed sampled XYZ/labels/confidence and
+normalized PCA direction. Inference, sampling, task results and tolerances are
+unchanged. `CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED` remains explicit.
+
+```text
+PHASE_10B_QT_POINTCLOUD_VISUALIZATION_COMPLETED
+```
+
+Detailed report: `docs/tensorrt_phase10b_qt_pointcloud_visualization.md`.

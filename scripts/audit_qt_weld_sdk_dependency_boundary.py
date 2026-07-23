@@ -24,6 +24,8 @@ FORBIDDEN_INCLUDES = {
     "TensorRTInference.h",
     "SegmentationPostProcessor.h",
     "WeldGeometryExtractor.h",
+    "pcl",
+    "vtk",
 }
 FORBIDDEN_PATH_MARKERS = {
     "strict_fp32_voxelunique_cub.plan",
@@ -55,7 +57,8 @@ def main() -> int:
         includes[relative] = file_includes
         for include in file_includes:
             leaf = Path(include).name
-            if leaf in FORBIDDEN_INCLUDES:
+            lowered = include.lower()
+            if leaf in FORBIDDEN_INCLUDES or lowered.startswith("pcl/") or lowered.startswith("vtk"):
                 violations.append({
                     "file": relative,
                     "kind": "forbidden_include",

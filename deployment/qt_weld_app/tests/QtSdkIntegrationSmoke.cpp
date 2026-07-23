@@ -1,9 +1,11 @@
 #include "MainWindow.h"
+#include "PointCloudView.h"
 #include "QtWeldResultViewModel.h"
 #include "WeldConfig.h"
 #include "WeldDetectionWorker.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
 #include <QDir>
@@ -17,6 +19,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QSignalSpy>
+#include <QSurfaceFormat>
 #include <QTextStream>
 #include <QThread>
 #include <QTimer>
@@ -163,6 +166,11 @@ private slots:
         auto* ratio = window->findChild<QLabel*>(QStringLiteral("weld_ratio"));
         auto* length = window->findChild<QLabel*>(QStringLiteral("length_mm"));
         auto* errors = window->findChild<QLabel*>(QStringLiteral("error_recorder_errors"));
+        auto* pointCloud = window->findChild<ptv2::qtui::PointCloudView*>(
+            QStringLiteral("pointCloudView"));
+        auto* resetView = window->findChild<QPushButton*>(QStringLiteral("resetViewButton"));
+        auto* bboxToggle = window->findChild<QCheckBox*>(QStringLiteral("showBboxCheck"));
+        auto* pcaToggle = window->findChild<QCheckBox*>(QStringLiteral("showPcaCheck"));
         QVERIFY(status != nullptr);
         QVERIFY(detect != nullptr);
         QVERIFY(sampled != nullptr);
@@ -170,12 +178,22 @@ private slots:
         QVERIFY(ratio != nullptr);
         QVERIFY(length != nullptr);
         QVERIFY(errors != nullptr);
+        QVERIFY(pointCloud != nullptr);
+        QVERIFY(resetView != nullptr);
+        QVERIFY(bboxToggle != nullptr);
+        QVERIFY(pcaToggle != nullptr);
+        QVERIFY2(waitUntil([&] {
+            return pointCloud->openGLInitialized() || !pointCloud->visualizationError().isEmpty();
+        }, 30000), "OpenGL initialization timed out");
+        QVERIFY2(pointCloud->openGLInitialized(), qPrintable(pointCloud->visualizationError()));
         QVERIFY2(waitUntil([&] { return status->text() == QStringLiteral("SUCCESS"); }, 120000),
             "MainWindow SDK initialization timed out");
         QVERIFY(detect->isEnabled());
 
         bool responsiveEventProcessed = false;
         QTimer::singleShot(1, [&] { responsiveEventProcessed = true; });
+        QElapsedTimer firstRefreshTimer;
+        firstRefreshTimer.start();
         QTest::mouseClick(detect, Qt::LeftButton);
         QVERIFY2(waitUntil([&] { return !detect->isEnabled(); }, 5000),
             "Detect did not enter active state");
@@ -185,9 +203,17 @@ private slots:
         QVERIFY(responsiveEventProcessed);
         QCOMPARE(sampled->text(), QStringLiteral("2048"));
         QCOMPARE(errors->text(), QStringLiteral("0"));
+        QCOMPARE(pointCloud->renderedPointCount(), 2048);
+        manual_.insert(QStringLiteral("first_detection_refresh_ms"),
+            static_cast<double>(firstRefreshTimer.nsecsElapsed()) / 1.0e6);
+        QCOMPARE(pointCloud->weldPointCount(), 209);
+        QCOMPARE(pointCloud->backgroundPointCount(), 1839);
+        QCOMPARE(pointCloud->lastGlError(), 0U);
         QVERIFY(std::abs(ratio->text().toDouble() - 0.10205078125) < 1.0e-7);
         QVERIFY(std::abs(length->text().toDouble() - 57.19605255) < 1.0e-3);
 
+        QElapsedTimer secondRefreshTimer;
+        secondRefreshTimer.start();
         QTest::mouseClick(detect, Qt::LeftButton);
         QVERIFY2(waitUntil([&] { return !detect->isEnabled(); }, 5000),
             "Second Detect did not enter active state");
@@ -195,6 +221,28 @@ private slots:
             "Second MainWindow detection timed out");
         QCOMPARE(weld->text(), QStringLiteral("209"));
         QCOMPARE(errors->text(), QStringLiteral("0"));
+        QCOMPARE(pointCloud->renderedPointCount(), 2048);
+        manual_.insert(QStringLiteral("second_detection_refresh_ms"),
+            static_cast<double>(secondRefreshTimer.nsecsElapsed()) / 1.0e6);
+        QVERIFY(QMetaObject::invokeMethod(
+            window.get(), "onDetectionFailed", Qt::DirectConnection,
+            Q_ARG(QString, QStringLiteral("POINTCLOUD_LOAD_FAILED")),
+            Q_ARG(QString, QStringLiteral("missing cloud test"))));
+        QCOMPARE(pointCloud->renderedPointCount(), 2048);
+        manual_.insert(QStringLiteral("missing_cloud_preserved_previous_view"), true);
+        QVERIFY(QMetaObject::invokeMethod(
+            window.get(), "onDetectionFailed", Qt::DirectConnection,
+            Q_ARG(QString, QStringLiteral("PREPROCESS_FAILED")),
+            Q_ARG(QString, QStringLiteral("2047 point test"))));
+        QCOMPARE(pointCloud->renderedPointCount(), 2048);
+        manual_.insert(QStringLiteral("small_cloud_preserved_previous_view"), true);
+        QTest::mouseClick(resetView, Qt::LeftButton);
+        QTest::mouseClick(bboxToggle, Qt::LeftButton);
+        QVERIFY(!bboxToggle->isChecked());
+        QTest::mouseClick(bboxToggle, Qt::LeftButton);
+        QTest::mouseClick(pcaToggle, Qt::LeftButton);
+        QVERIFY(!pcaToggle->isChecked());
+        QTest::mouseClick(pcaToggle, Qt::LeftButton);
 
         manual_.insert(QStringLiteral("application_started"), true);
         manual_.insert(QStringLiteral("initialization_status_displayed"), true);
@@ -206,6 +254,17 @@ private slots:
         manual_.insert(QStringLiteral("weld_ratio"), ratio->text().toDouble());
         manual_.insert(QStringLiteral("length_mm"), length->text().toDouble());
         manual_.insert(QStringLiteral("error_recorder_errors"), errors->text().toInt());
+        manual_.insert(QStringLiteral("rendered_points"), pointCloud->renderedPointCount());
+        manual_.insert(QStringLiteral("weld_colored_points"), pointCloud->weldPointCount());
+        manual_.insert(QStringLiteral("background_colored_points"), pointCloud->backgroundPointCount());
+        manual_.insert(QStringLiteral("opengl_version"), pointCloud->openGLVersion());
+        manual_.insert(QStringLiteral("opengl_renderer"), pointCloud->openGLRenderer());
+        manual_.insert(QStringLiteral("opengl_vendor"), pointCloud->openGLVendor());
+        manual_.insert(QStringLiteral("bbox_toggle"), true);
+        manual_.insert(QStringLiteral("pca_toggle"), true);
+        manual_.insert(QStringLiteral("reset_view"), true);
+        manual_.insert(QStringLiteral("second_detection_replaced_not_duplicated"),
+            pointCloud->renderedPointCount() == 2048);
         window.reset();
         manual_.insert(QStringLiteral("clean_close"), true);
         automated_.insert(QStringLiteral("main_window_construct_and_shutdown"), true);
@@ -529,6 +588,13 @@ int main(int argc, char** argv)
     for (int index = 0; index < argc; ++index)
         rawArguments.append(QString::fromLocal8Bit(argv[index]));
     QCoreApplication::setAttribute(Qt::AA_Use96Dpi, true);
+    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL, true);
+    QSurfaceFormat format;
+    format.setRenderableType(QSurfaceFormat::OpenGL);
+    format.setVersion(3, 3);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setDepthBufferSize(24);
+    QSurfaceFormat::setDefaultFormat(format);
     QApplication application(argc, argv);
     application.setApplicationName(QStringLiteral("QtSdkIntegrationSmoke"));
 

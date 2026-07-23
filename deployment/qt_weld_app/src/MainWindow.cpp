@@ -1,9 +1,13 @@
 #include "MainWindow.h"
 
+#include "PointCloudRenderData.h"
+#include "PointCloudView.h"
 #include "WeldDetectionWorker.h"
 
+#include <QCheckBox>
 #include <QDateTime>
 #include <QDir>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -65,7 +69,7 @@ MainWindow::~MainWindow()
 void MainWindow::buildUi()
 {
     setWindowTitle(QStringLiteral("PTV2 WeldDetector SDK Smoke"));
-    resize(920, 900);
+    resize(1320, 980);
 
     auto* central = new QWidget(this);
     auto* root = new QVBoxLayout(central);
@@ -90,6 +94,38 @@ void MainWindow::buildUi()
     inputLayout->addRow(QStringLiteral("Cloud TXT"), pathRow);
     inputLayout->addRow(QStringLiteral("Initialize status"), initializeStatus_);
     root->addWidget(inputGroup);
+
+    auto* visualizationGroup = new QGroupBox(QStringLiteral("Segmented point cloud"), central);
+    auto* visualizationLayout = new QVBoxLayout(visualizationGroup);
+    auto* visualizationControls = new QHBoxLayout();
+    resetViewButton_ = new QPushButton(QStringLiteral("Reset View"), visualizationGroup);
+    resetViewButton_->setObjectName(QStringLiteral("resetViewButton"));
+    showBboxCheck_ = new QCheckBox(QStringLiteral("Show Bounding Box"), visualizationGroup);
+    showBboxCheck_->setObjectName(QStringLiteral("showBboxCheck"));
+    showBboxCheck_->setChecked(true);
+    showPcaCheck_ = new QCheckBox(QStringLiteral("Show PCA Direction"), visualizationGroup);
+    showPcaCheck_->setObjectName(QStringLiteral("showPcaCheck"));
+    showPcaCheck_->setChecked(true);
+    pointSizeSpin_ = new QDoubleSpinBox(visualizationGroup);
+    pointSizeSpin_->setObjectName(QStringLiteral("pointSizeSpin"));
+    pointSizeSpin_->setRange(1.0, 12.0);
+    pointSizeSpin_->setValue(3.0);
+    pointSizeSpin_->setSingleStep(0.5);
+    visualizationControls->addWidget(resetViewButton_);
+    visualizationControls->addWidget(showBboxCheck_);
+    visualizationControls->addWidget(showPcaCheck_);
+    visualizationControls->addWidget(new QLabel(QStringLiteral("Point size"), visualizationGroup));
+    visualizationControls->addWidget(pointSizeSpin_);
+    visualizationControls->addStretch(1);
+    auto* legend = new QLabel(
+        QStringLiteral("<span style='color:#ff4014'>● Weld seam (class 0)</span>"
+                       "&nbsp;&nbsp;<span style='color:#2e8cf2'>● Background (class 1)</span>"),
+        visualizationGroup);
+    pointCloudView_ = new PointCloudView(visualizationGroup);
+    visualizationLayout->addLayout(visualizationControls);
+    visualizationLayout->addWidget(legend);
+    visualizationLayout->addWidget(pointCloudView_, 1);
+    root->addWidget(visualizationGroup, 2);
 
     auto* resultGroup = new QGroupBox(QStringLiteral("Weld detection result"), central);
     auto* resultLayout = new QFormLayout(resultGroup);
@@ -131,6 +167,17 @@ void MainWindow::buildUi()
     setCentralWidget(central);
     connect(browseButton_, &QPushButton::clicked, this, &MainWindow::browseCloud);
     connect(detectButton_, &QPushButton::clicked, this, &MainWindow::startDetection);
+    connect(resetViewButton_, &QPushButton::clicked, this, &MainWindow::resetVisualization);
+    connect(showBboxCheck_, &QCheckBox::toggled, pointCloudView_, &PointCloudView::setShowBoundingBox);
+    connect(showPcaCheck_, &QCheckBox::toggled, pointCloudView_, &PointCloudView::setShowPcaDirection);
+    connect(pointSizeSpin_, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+        [this](double value) { pointCloudView_->setPointSize(static_cast<float>(value)); });
+    connect(pointCloudView_, &PointCloudView::visualizationLog, this, &MainWindow::appendLog);
+    connect(pointCloudView_, &PointCloudView::openGLStatusChanged,
+        [this](bool ready, QString const& message) {
+            appendLog(QStringLiteral("Visualization %1: %2")
+                .arg(ready ? QStringLiteral("ready") : QStringLiteral("failed"), message));
+        });
 }
 
 QString MainWindow::normalizedFilePath(QString const& path) const
@@ -194,6 +241,18 @@ void MainWindow::onDetectionStarted(QString cloudPath)
 void MainWindow::onDetectionSucceeded(QtWeldResultViewModel result)
 {
     detectionActive_ = false;
+    PointCloudRenderData const renderData = PointCloudRenderData::fromResult(result);
+    QString visualizationError;
+    if (!pointCloudView_->setPointCloud(renderData, visualizationError))
+    {
+        appendLog(QStringLiteral("VISUALIZATION_DATA_FAILED: %1; previous successful view preserved")
+            .arg(visualizationError));
+    }
+    else
+    {
+        appendLog(QStringLiteral("Visualization updated: points=%1, conversion=%2 ms")
+            .arg(renderData.points.size()).arg(renderData.conversionMs, 0, 'f', 4));
+    }
     setResult(QStringLiteral("source"), QStringLiteral("%1 | %2").arg(result.taskId, result.sourcePath));
     setResult(QStringLiteral("sdk_status"), result.status);
     setResult(QStringLiteral("original_points"), QString::number(result.originalPoints));
@@ -218,6 +277,12 @@ void MainWindow::onDetectionSucceeded(QtWeldResultViewModel result)
     appendLog(QStringLiteral("Detection succeeded: weld points=%1, length=%2 mm")
         .arg(result.weldPoints).arg(result.lengthMm, 0, 'g', 10));
     updateControls();
+}
+
+void MainWindow::resetVisualization()
+{
+    pointCloudView_->resetView();
+    appendLog(QStringLiteral("Visualization view reset"));
 }
 
 void MainWindow::onDetectionFailed(QString status, QString message)

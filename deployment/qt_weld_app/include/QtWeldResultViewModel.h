@@ -4,9 +4,19 @@
 
 #include <QMetaType>
 #include <QString>
+#include <QVector>
 
 namespace ptv2::qtui
 {
+
+struct QtWeldPointViewModel
+{
+    float x{};
+    float y{};
+    float z{};
+    int label{};
+    float confidence{};
+};
 
 struct QtWeldResultViewModel
 {
@@ -28,6 +38,9 @@ struct QtWeldResultViewModel
     double bboxMaxX{};
     double bboxMaxY{};
     double bboxMaxZ{};
+    double principalDirectionX{};
+    double principalDirectionY{};
+    double principalDirectionZ{};
     double loadCloudMs{};
     double samplingMs{};
     double adjacencyBuildMs{};
@@ -36,6 +49,7 @@ struct QtWeldResultViewModel
     double postprocessMs{};
     double totalMs{};
     int errorRecorderErrors{};
+    QVector<QtWeldPointViewModel> points;
 
     static QtWeldResultViewModel fromSdk(
         ptv2::weld::WeldResult const& result,

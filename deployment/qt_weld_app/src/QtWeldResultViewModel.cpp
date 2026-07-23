@@ -28,6 +28,9 @@ QtWeldResultViewModel QtWeldResultViewModel::fromSdk(
     view.bboxMaxX = result.bbox_max[0];
     view.bboxMaxY = result.bbox_max[1];
     view.bboxMaxZ = result.bbox_max[2];
+    view.principalDirectionX = result.principal_direction[0];
+    view.principalDirectionY = result.principal_direction[1];
+    view.principalDirectionZ = result.principal_direction[2];
     view.loadCloudMs = result.load_cloud_ms;
     view.samplingMs = result.sampling_ms;
     view.adjacencyBuildMs = result.adjacency_build_ms;
@@ -36,6 +39,12 @@ QtWeldResultViewModel QtWeldResultViewModel::fromSdk(
     view.postprocessMs = result.postprocess_ms;
     view.totalMs = result.total_ms;
     view.errorRecorderErrors = result.error_recorder_errors;
+    view.points.reserve(static_cast<int>(result.points.size()));
+    for (auto const& point : result.points)
+    {
+        view.points.append(QtWeldPointViewModel{
+            point.x, point.y, point.z, point.label, point.confidence});
+    }
     return view;
 }
 

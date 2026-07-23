@@ -64,3 +64,16 @@ blocking worker shutdown followed by `QThread::quit()`/`wait()`.
 
 Phase 10A has no point-cloud visualization. It does not add PCL, VTK,
 OpenGL, robot interfaces, FP16, INT8, or concurrent SDK inference.
+
+## Phase 10B visualization
+
+The application now renders the 2048 public SDK points with
+`QOpenGLWidget`/`QOpenGLFunctions`; it never reads prediction/PLY/logit files
+or TensorRT/CUDA buffers. Class 0 `weld_seam` is orange-red and class 1
+`background` is blue. Confidence is retained and validated but does not alter
+the class color.
+
+Controls: left-drag rotate, right/middle-drag pan, wheel zoom, double-click or
+**Reset View** to reset, plus bbox/PCA toggles and point-size control. The
+centroid, bbox and PCA line use SDK geometry; Qt does not recompute PCA. The
+previous successful view is preserved on later detection/render failure.

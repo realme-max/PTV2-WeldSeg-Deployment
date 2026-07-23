@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QRegularExpression>
+#include <QSurfaceFormat>
 #include <QStringList>
 
 namespace
@@ -35,6 +36,14 @@ int main(int argc, char** argv)
     for (int index = 0; index < argc; ++index)
         rawArguments.append(QString::fromLocal8Bit(argv[index]));
 
+    QCoreApplication::setAttribute(Qt::AA_UseDesktopOpenGL, true);
+    QSurfaceFormat format;
+    format.setRenderableType(QSurfaceFormat::OpenGL);
+    format.setVersion(3, 3);
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setDepthBufferSize(24);
+    format.setSamples(4);
+    QSurfaceFormat::setDefaultFormat(format);
     QApplication application(argc, argv);
     application.setApplicationName(QStringLiteral("ptv2_weld_qt_smoke"));
     application.setApplicationVersion(QStringLiteral("Phase 10A"));

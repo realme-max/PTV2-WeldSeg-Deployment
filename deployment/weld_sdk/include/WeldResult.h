@@ -6,6 +6,15 @@
 namespace ptv2::weld
 {
 
+struct WeldPointResult
+{
+    float x{};
+    float y{};
+    float z{};
+    int label{};
+    float confidence{};
+};
+
 struct WeldResult
 {
     bool success{};
@@ -18,6 +27,7 @@ struct WeldResult
     float center[3]{};
     float bbox_min[3]{};
     float bbox_max[3]{};
+    float principal_direction[3]{};
     float length_mm{};
     float inference_ms{};
     float load_cloud_ms{};
@@ -28,6 +38,7 @@ struct WeldResult
     float total_ms{};
     int error_recorder_errors{};
     std::vector<int> labels;
+    std::vector<WeldPointResult> points;
 
     void clear() noexcept;
 };

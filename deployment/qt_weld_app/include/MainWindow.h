@@ -13,12 +13,15 @@
 class QLabel;
 class QLineEdit;
 class QPushButton;
+class QCheckBox;
+class QDoubleSpinBox;
 class QTextEdit;
 
 namespace ptv2::qtui
 {
 
 class WeldDetectionWorker;
+class PointCloudView;
 
 class MainWindow final : public QMainWindow
 {
@@ -40,6 +43,7 @@ private slots:
     void onDetectionSucceeded(ptv2::qtui::QtWeldResultViewModel result);
     void onDetectionFailed(QString status, QString message);
     void appendLog(QString message);
+    void resetVisualization();
 
 private:
     void buildUi();
@@ -54,6 +58,11 @@ private:
     QPushButton* detectButton_{nullptr};
     QLabel* initializeStatus_{nullptr};
     QTextEdit* logEdit_{nullptr};
+    PointCloudView* pointCloudView_{nullptr};
+    QPushButton* resetViewButton_{nullptr};
+    QCheckBox* showBboxCheck_{nullptr};
+    QCheckBox* showPcaCheck_{nullptr};
+    QDoubleSpinBox* pointSizeSpin_{nullptr};
     std::map<std::string, QLabel*> resultLabels_;
     bool initialized_{false};
     bool detectionActive_{false};

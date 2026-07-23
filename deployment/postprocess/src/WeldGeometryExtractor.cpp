@@ -183,9 +183,15 @@ bool WeldGeometryExtractor::extract(
         result.center[axis] = static_cast<float>(center[axis]);
         result.bboxMin[axis] = static_cast<float>(minimum[axis]);
         result.bboxMax[axis] = static_cast<float>(maximum[axis]);
+        result.principalDirection[axis] = static_cast<float>(direction[axis]);
     }
     result.lengthMm = static_cast<float>(projectionMax - projectionMin);
-    if (!std::isfinite(result.weldRatio) || !std::isfinite(result.lengthMm))
+    float const directionNorm = std::sqrt(
+        result.principalDirection[0] * result.principalDirection[0]
+        + result.principalDirection[1] * result.principalDirection[1]
+        + result.principalDirection[2] * result.principalDirection[2]);
+    if (!std::isfinite(result.weldRatio) || !std::isfinite(result.lengthMm)
+        || !std::isfinite(directionNorm) || std::abs(directionNorm - 1.0F) > 1.0e-5F)
     {
         lastError_ = "Computed weld geometry contains NaN/Inf";
         result = {};

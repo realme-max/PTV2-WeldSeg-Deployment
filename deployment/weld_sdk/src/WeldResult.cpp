@@ -17,6 +17,7 @@ void WeldResult::clear() noexcept
     std::fill(std::begin(center), std::end(center), 0.0F);
     std::fill(std::begin(bbox_min), std::end(bbox_min), 0.0F);
     std::fill(std::begin(bbox_max), std::end(bbox_max), 0.0F);
+    std::fill(std::begin(principal_direction), std::end(principal_direction), 0.0F);
     length_mm = 0.0F;
     inference_ms = 0.0F;
     load_cloud_ms = 0.0F;
@@ -27,6 +28,7 @@ void WeldResult::clear() noexcept
     total_ms = 0.0F;
     error_recorder_errors = 0;
     labels.clear();
+    points.clear();
 }
 
 } // namespace ptv2::weld

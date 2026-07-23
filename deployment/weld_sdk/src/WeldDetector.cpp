@@ -175,6 +175,10 @@ public:
                 std::copy(geometry.center.begin(), geometry.center.end(), result.center);
                 std::copy(geometry.bboxMin.begin(), geometry.bboxMin.end(), result.bbox_min);
                 std::copy(geometry.bboxMax.begin(), geometry.bboxMax.end(), result.bbox_max);
+                std::copy(
+                    geometry.principalDirection.begin(),
+                    geometry.principalDirection.end(),
+                    result.principal_direction);
                 result.length_mm = geometry.lengthMm;
             }
             result.inference_ms = runtime_.lastInferenceDeviceMs();
@@ -185,7 +189,13 @@ public:
             result.postprocess_ms = postprocessMs;
             result.error_recorder_errors = runtime_.errorRecorderErrors();
             result.labels.reserve(segmentation.size());
-            for (auto const& point : segmentation) result.labels.push_back(point.label);
+            result.points.reserve(segmentation.size());
+            for (auto const& point : segmentation)
+            {
+                result.labels.push_back(point.label);
+                result.points.push_back(WeldPointResult{
+                    point.x, point.y, point.z, point.label, point.confidence});
+            }
 
             if (!config_.output_path.empty())
             {

@@ -63,6 +63,8 @@ void writeResult(std::filesystem::path const& path, ptv2::weld::WeldResult const
            << "  \"center\": [" << result.center[0] << ',' << result.center[1] << ',' << result.center[2] << "],\n"
            << "  \"bbox_min\": [" << result.bbox_min[0] << ',' << result.bbox_min[1] << ',' << result.bbox_min[2] << "],\n"
            << "  \"bbox_max\": [" << result.bbox_max[0] << ',' << result.bbox_max[1] << ',' << result.bbox_max[2] << "],\n"
+           << "  \"principal_direction\": [" << result.principal_direction[0] << ','
+           << result.principal_direction[1] << ',' << result.principal_direction[2] << "],\n"
            << "  \"length_mm\": " << result.length_mm << ",\n"
            << "  \"inference_ms\": " << result.inference_ms << ",\n"
            << "  \"load_cloud_ms\": " << result.load_cloud_ms << ",\n"
@@ -72,7 +74,8 @@ void writeResult(std::filesystem::path const& path, ptv2::weld::WeldResult const
            << "  \"postprocess_ms\": " << result.postprocess_ms << ",\n"
            << "  \"total_ms\": " << result.total_ms << ",\n"
            << "  \"error_recorder_errors\": " << result.error_recorder_errors << ",\n"
-           << "  \"labels_count\": " << result.labels.size() << "\n"
+           << "  \"labels_count\": " << result.labels.size() << ",\n"
+           << "  \"points_count\": " << result.points.size() << "\n"
            << "}\n";
     if (!output) throw std::runtime_error("Failed to write SDK result: " + path.string());
 }
@@ -108,11 +111,34 @@ int main(int argc, char** argv)
         }
         if (!result.success || result.total_points != 2048
             || result.weld_points != 209 || result.labels.size() != 2048U
+            || result.points.size() != 2048U
             || std::abs(result.length_mm - 57.19605255F) > 0.01F
             || result.error_recorder_errors != 0)
         {
             std::cerr << "STATUS=POSTPROCESS_FAILED\n"
                       << "ERROR=SDK result failed the weld_65 smoke contract\n";
+            return 1;
+        }
+        float const directionNorm = std::sqrt(
+            result.principal_direction[0] * result.principal_direction[0]
+            + result.principal_direction[1] * result.principal_direction[1]
+            + result.principal_direction[2] * result.principal_direction[2]);
+        for (auto const& point : result.points)
+        {
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)
+                || !std::isfinite(point.confidence)
+                || point.confidence < 0.0F || point.confidence > 1.0F
+                || (point.label != 0 && point.label != 1))
+            {
+                std::cerr << "STATUS=POSTPROCESS_FAILED\n"
+                          << "ERROR=SDK visualization point contract failed\n";
+                return 1;
+            }
+        }
+        if (!std::isfinite(directionNorm) || std::abs(directionNorm - 1.0F) > 1.0e-5F)
+        {
+            std::cerr << "STATUS=POSTPROCESS_FAILED\n"
+                      << "ERROR=SDK principal direction contract failed\n";
             return 1;
         }
 
@@ -131,6 +157,8 @@ int main(int argc, char** argv)
                   << "LENGTH_MM=" << result.length_mm << '\n'
                   << "INFERENCE_MS=" << result.inference_ms << '\n'
                   << "ERROR_RECORDER_ERRORS=" << result.error_recorder_errors << '\n'
+                  << "VISUALIZATION_POINTS=" << result.points.size() << '\n'
+                  << "PRINCIPAL_DIRECTION_NORM=" << directionNorm << '\n'
                   << "SDK_SMOKE_TEST_PASSED\n";
         return 0;
     }
