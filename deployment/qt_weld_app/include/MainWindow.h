@@ -33,6 +33,7 @@ class WeldDetectionWorker;
 class PointCloudView;
 class ApplicationLogger;
 class RecentTaskStore;
+class QtCloudBrowseDirectoryTest;
 
 class MainWindow final : public QMainWindow
 {
@@ -83,10 +84,15 @@ private:
     void updateControls();
     void setResult(QString const& key, QString const& value);
     QString normalizedFilePath(QString const& path) const;
+    QString resolveInitialCloudDirectory() const;
+    void applyCloudSelection(QString const& selectedFile);
+    void persistLastCloudDirectory(QString const& selectedFile);
     void restoreWindowLayout();
     void saveWindowLayout();
     void applySafeDefaultGeometry();
     bool geometryHasVisibleArea(QRect const& geometry) const;
+
+    friend class QtCloudBrowseDirectoryTest;
 
     QThread workerThread_;
     WeldDetectionWorker* worker_{nullptr};

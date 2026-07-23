@@ -815,3 +815,72 @@ Evidence:
 
 Detailed report:
 `docs/tensorrt_phase10c1_qt_layout_resize_stability.md`.
+
+## 26. Phase 10C.2: Qt Browse default directory completed
+
+The point-cloud Browse workflow now resolves its initial directory in this
+order: remembered directory (when enabled), configured default, package-local
+`data/weld/000001`, development `E:/GRP-PTv2/data/weld/000001`, application
+directory, then home. Missing candidates are skipped. Successful selections
+persist their parent directory as `[Application] last_cloud_directory`;
+cancellation changes nothing, and Browse never starts detection.
+
+VS2022 x64 Release `/W4 /WX` passed. The new Browse integration test passed
+9/9 checks and full CTest passed 10/10. It exercises the real Qt file dialog,
+including initial-directory inspection, cancel, accepted-selection
+persistence and second-open behavior. The qualified 0.1.1 package launched,
+remained responsive and closed cleanly. Windows UI capture could not attach to
+the Qt/OpenGL window (`SetIsBorderRequired failed`, `0x80004002`), so no
+unsupported coordinate automation was used.
+
+```text
+PHASE_10C2_QT_BROWSE_DEFAULT_DIRECTORY_COMPLETED
+```
+
+Evidence:
+`artifacts/gcn_res_tensorrt/20260723_194208_270011_phase10c2_qt_browse_default_directory/`.
+
+Detailed report:
+`docs/tensorrt_phase10c2_qt_browse_default_directory.md`.
+
+## 27. Phase 11A: Release full test-set qualification blocked
+
+Phase 11A exercised the frozen production pipeline on the authoritative
+18-sample test split. VS2022 x64 Release built successfully. All 18 SDK
+executions returned finite `[1,2048,2]` logits, sampled 2048 points and
+reported zero ErrorRecorder errors. The three-round same-process run,
+five cold starts, 360-detection soak, package/source comparison, all 18 export
+sets, 15 fail-closed probes and the four-case GUI subset passed.
+
+Global metrics were accuracy 0.979220920, mIoU 0.937857656, weld precision
+0.960087779, recall 0.936454849 and F1 0.948124069. The current same-input
+strict comparison passed 14/18 at `max_abs < 1e-4`; failures were `weld_88`,
+`weld_18`, `weld_4` and `weld_15`, with worst `weld_4` at
+0.0001220703125. Historical Phase 8D remains separately recorded as 13/18,
+worst `weld_14` at 0.00012302398681640625. Strict numerical equivalence is
+not claimed.
+
+The hard qualification blocker is a preprocessing-order mismatch. Phase 8D
+froze a NumPy point permutation, whereas the production C++ SDK uses
+`std::mt19937 + std::shuffle`. The 2048-point set is unchanged, but the order
+differs and this network is measurably order-sensitive. Phase 11A task metrics
+therefore differ from the approved Phase 8D baseline despite unchanged
+Engine, Plugin, ONNX and checkpoint hashes. This is not classified as a model
+asset regression. A later explicitly authorized phase must select and freeze
+one authoritative sampling/order contract before requalification.
+
+Mean warm SDK detect time was 28.106839 ms. CPU k=6 adjacency construction
+was the primary bottleneck at 18.512883 ms (65.8661%); no optimization was
+performed.
+
+```text
+PHASE_11A_RELEASE_FULL_TESTSET_QUALIFICATION_BLOCKED
+TENSORRT_RELEASE_FULL_TESTSET_TASK_EQUIVALENCE_FAILED
+CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED
+```
+
+Evidence:
+`artifacts/gcn_res_tensorrt/20260723_202430_351197_phase11a_release_full_testset_qualification/`.
+
+Detailed report:
+`docs/tensorrt_phase11a_release_full_testset_qualification.md`.

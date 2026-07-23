@@ -135,6 +135,16 @@ target_link_libraries(QtLayoutResizeStabilityTest
         Qt${QT_VERSION_MAJOR}::Test
 )
 
+add_executable(QtCloudBrowseDirectoryTest tests/QtCloudBrowseDirectoryTest.cpp)
+target_link_libraries(QtCloudBrowseDirectoryTest
+    PRIVATE
+        ptv2_weld_qt_frontend
+        ptv2_weld_sdk
+        Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::OpenGL
+        Qt${QT_VERSION_MAJOR}::Test
+)
+
 foreach(product_test
     AppConfigTest
     AppStateMachineTest
@@ -157,6 +167,7 @@ if(MSVC)
     target_compile_options(PointCloudRenderDataTest PRIVATE /W4 /WX /utf-8)
     target_compile_options(PointCloudViewSmokeTest PRIVATE /W4 /WX /utf-8)
     target_compile_options(QtLayoutResizeStabilityTest PRIVATE /W4 /WX /utf-8)
+    target_compile_options(QtCloudBrowseDirectoryTest PRIVATE /W4 /WX /utf-8)
     foreach(product_test
         AppConfigTest
         AppStateMachineTest
@@ -173,6 +184,7 @@ foreach(runtime_target
     PointCloudRenderDataTest
     PointCloudViewSmokeTest
     QtLayoutResizeStabilityTest
+    QtCloudBrowseDirectoryTest
     AppConfigTest
     AppStateMachineTest
     DetectionExportTest
@@ -234,6 +246,16 @@ if(DEFINED PTV2_TEST_ENGINE
     add_test(
         NAME QtLayoutResizeStabilityTest
         COMMAND QtLayoutResizeStabilityTest
+            --engine "${PTV2_TEST_ENGINE}"
+            --trt-plugin "${PTV2_TEST_PLUGIN}"
+            --engine-sha256 "${PTV2_TEST_ENGINE_SHA256}"
+            --plugin-sha256 "${PTV2_TEST_PLUGIN_SHA256}"
+            --cloud "${PTV2_TEST_CLOUD}"
+            --artifact-dir "${PTV2_TEST_ARTIFACT_DIR}"
+    )
+    add_test(
+        NAME QtCloudBrowseDirectoryTest
+        COMMAND QtCloudBrowseDirectoryTest
             --engine "${PTV2_TEST_ENGINE}"
             --trt-plugin "${PTV2_TEST_PLUGIN}"
             --engine-sha256 "${PTV2_TEST_ENGINE_SHA256}"

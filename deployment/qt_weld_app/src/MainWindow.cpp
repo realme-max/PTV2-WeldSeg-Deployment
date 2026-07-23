@@ -11,6 +11,7 @@
 #include "WeldDetectionWorker.h"
 
 #include <QCheckBox>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -373,16 +374,79 @@ QString MainWindow::normalizedFilePath(QString const& path) const
     return QDir::toNativeSeparators(QFileInfo(path).absoluteFilePath());
 }
 
-void MainWindow::browseCloud()
+QString MainWindow::resolveInitialCloudDirectory() const
 {
-    QString const selected = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Select weld point cloud"), appConfig_.defaultCloudDirectory,
-        QStringLiteral("Point cloud TXT (*.txt)"));
-    if (selected.isEmpty()) return;
-    cloudPathEdit_->setText(normalizedFilePath(selected));
+    auto existingDirectory = [](QString const& candidate) {
+        QString const trimmed = candidate.trimmed();
+        if (trimmed.isEmpty()) return QString();
+        QFileInfo const info(trimmed);
+        if (!info.isDir()) return QString();
+        return QDir::toNativeSeparators(info.absoluteFilePath());
+    };
+
+    if (appConfig_.rememberLastCloud && !userSettingsPath_.isEmpty())
+    {
+        QSettings settings(userSettingsPath_, QSettings::IniFormat);
+        QString const lastDirectory = existingDirectory(
+            settings.value(QStringLiteral("Application/last_cloud_directory")).toString());
+        if (!lastDirectory.isEmpty()) return lastDirectory;
+    }
+
+    QString const configuredDirectory =
+        existingDirectory(appConfig_.defaultCloudDirectory);
+    if (!configuredDirectory.isEmpty()) return configuredDirectory;
+
+    QString const applicationDirectory = QCoreApplication::applicationDirPath();
+    QString const packageDirectory = existingDirectory(
+        QDir(applicationDirectory).filePath(QStringLiteral("data/weld/000001")));
+    if (!packageDirectory.isEmpty()) return packageDirectory;
+
+    QString const developmentDirectory =
+        existingDirectory(QStringLiteral("E:/GRP-PTv2/data/weld/000001"));
+    if (!developmentDirectory.isEmpty()) return developmentDirectory;
+
+    QString const executableDirectory = existingDirectory(applicationDirectory);
+    if (!executableDirectory.isEmpty()) return executableDirectory;
+
+    return QDir::homePath();
+}
+
+void MainWindow::persistLastCloudDirectory(QString const& selectedFile)
+{
+    if (!appConfig_.rememberLastCloud || userSettingsPath_.isEmpty()) return;
+
+    QFileInfo const selectedInfo(selectedFile);
+    QString const selectedDirectory =
+        QDir::toNativeSeparators(selectedInfo.absolutePath());
+    if (!QDir(selectedDirectory).exists()) return;
+
+    QSettings settings(userSettingsPath_, QSettings::IniFormat);
+    settings.setValue(
+        QStringLiteral("Application/last_cloud_directory"), selectedDirectory);
+    settings.sync();
+    if (settings.status() != QSettings::NoError)
+    {
+        appendLog(QStringLiteral("LAST_CLOUD_DIRECTORY_SAVE_FAILED: %1")
+            .arg(userSettingsPath_));
+    }
+}
+
+void MainWindow::applyCloudSelection(QString const& selectedFile)
+{
+    if (selectedFile.isEmpty()) return;
+    cloudPathEdit_->setText(normalizedFilePath(selectedFile));
+    persistLastCloudDirectory(selectedFile);
     appendLog(QStringLiteral("Cloud selected: %1").arg(cloudPathEdit_->text()));
     setState(AppState::kCloudSelected);
     updateControls();
+}
+
+void MainWindow::browseCloud()
+{
+    QString const selected = QFileDialog::getOpenFileName(
+        this, QStringLiteral("Select weld point cloud"), resolveInitialCloudDirectory(),
+        QStringLiteral("Point cloud TXT (*.txt)"));
+    applyCloudSelection(selected);
 }
 
 void MainWindow::startDetection()
