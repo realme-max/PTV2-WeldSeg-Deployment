@@ -654,3 +654,30 @@ CPP_POSTPROCESS_PIPELINE_COMPLETED
 ```
 
 Detailed report: `docs/tensorrt_phase9c_postprocess.md`. Stop here; Qt, PCL visualization, Robot integration, FP16, INT8, and CUDA post-processing are not started.
+
+## 21. Phase 9D: WeldDetector C++ SDK completed
+
+Phase 9D introduced `deployment/weld_sdk/` as the only public application-facing C++ layer. It wraps the existing point-cloud pipeline, TensorRT Runtime and post-processing modules without copying or modifying their implementation.
+
+- Static library: `ptv2_weld_sdk.lib`.
+- Public API: `WeldConfig`, `WeldStatus`, `WeldResult`, and Pimpl-based `WeldDetector`.
+- `WeldResult` exposes task fields and 2048 labels only; logits, CUDA pointers, TensorRT buffers and internal module objects remain private.
+- Typed fail-closed statuses replace exception-driven application control flow.
+- `weld_trt_app/main.cpp` now includes only SDK headers and performs argument parsing, initialize, detect and result printing.
+- Optional `WeldConfig::output_path` preserves Phase 9C JSON/PLY/prediction output entirely inside the SDK.
+- Build: Visual Studio 2022 x64 Release PASS; `ptv2_weld_sdk.lib`, `sdk_smoke_test.exe`, and SDK-only `weld_trt_demo.exe` generated.
+- Formal validation: `artifacts/gcn_res_tensorrt/20260720_161056_633334_phase9d_weld_sdk/`.
+- SDK smoke: success, `weld_65`, 2048 labels, 209 weld points, PCA length `57.1960526 mm`.
+- Phase 9C/9D labels: 2048/2048 equal; geometry maximum error `4.257812520e-7` (`<1e-5`).
+- SDK-only application labels and geometry match the SDK smoke result.
+- Four fail-closed status tests passed: missing Engine -> `ENGINE_LOAD_FAILED`, missing Plugin -> `PLUGIN_LOAD_FAILED`, missing cloud -> `POINTCLOUD_LOAD_FAILED`, and 2047 points -> `PREPROCESS_FAILED`.
+- Production Engine/Plugin hashes remained unchanged and TensorRT Runtime core has no diff.
+
+One detector owns one execution context and is not thread-safe; callers must use one instance per thread or serialize access. The Phase 8D exception `CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED` remains explicit.
+
+```text
+PHASE_9D_WELD_SDK_COMPLETED
+WELD_DETECTOR_SDK_COMPLETED
+```
+
+Detailed report: `docs/tensorrt_phase9d_weld_sdk.md`. Stop here; Qt, FP16, INT8, CUDA optimization and additional deployment phases are not started.
