@@ -11,6 +11,7 @@
 #include "WeldGeometryExtractor.h"
 
 #include <algorithm>
+#include <chrono>
 #include <exception>
 #include <filesystem>
 #include <string>
@@ -25,6 +26,12 @@ namespace
 
 constexpr char kProductionEngineSha256[]{
     "a624601c63e99689fb67a6066ce8a6e346bc42dfa2a885e0f83c74f0ca742299"};
+using Clock = std::chrono::steady_clock;
+
+float elapsedMs(Clock::time_point started)
+{
+    return std::chrono::duration<float, std::milli>(Clock::now() - started).count();
+}
 
 bool isRegularFile(std::string const& path)
 {
@@ -84,6 +91,7 @@ public:
         WeldStatus stage = WeldStatus::PREPROCESS_FAILED;
         try
         {
+            auto const totalStarted = Clock::now();
             if (!initialized_)
             {
                 return fail(WeldStatus::INVALID_CONFIG, "WeldDetector is not initialized");
@@ -95,32 +103,39 @@ public:
 
             stage = WeldStatus::POINTCLOUD_LOAD_FAILED;
             std::vector<ptv2::pointcloud::PointXYZL> fullCloud;
+            auto started = Clock::now();
             if (!loader_.load(cloudPath, fullCloud))
             {
                 return fail(stage, loader_.lastError());
             }
+            float const loadCloudMs = elapsedMs(started);
 
             stage = WeldStatus::PREPROCESS_FAILED;
             std::vector<ptv2::pointcloud::PointXYZL> sampled;
+            started = Clock::now();
             if (!sampler_.sample(fullCloud, sampled, config_.input_points))
             {
                 return fail(stage, sampler_.lastError());
             }
+            float const samplingMs = elapsedMs(started);
             std::vector<float> features;
             if (!featureBuilder_.buildPointsFeature(fullCloud, sampled, features))
             {
                 return fail(stage, featureBuilder_.lastError());
             }
             std::vector<float> adjacency;
+            started = Clock::now();
             if (!graphBuilder_.build(sampled, adjacency))
             {
                 return fail(stage, graphBuilder_.lastError());
             }
+            float const adjacencyBuildMs = elapsedMs(started);
 
             stage = WeldStatus::INFERENCE_FAILED;
             std::vector<float> logits(
                 static_cast<std::size_t>(config_.input_points)
                 * static_cast<std::size_t>(config_.num_classes));
+            started = Clock::now();
             if (!runtime_.infer(
                     features.data(), features.size(),
                     adjacency.data(), adjacency.size(),
@@ -128,8 +143,10 @@ public:
             {
                 return fail(stage, runtime_.lastError());
             }
+            float const inferenceWallMs = elapsedMs(started);
 
             stage = WeldStatus::POSTPROCESS_FAILED;
+            started = Clock::now();
             std::vector<ptv2::pointcloud::PointXYZL> recovered;
             if (!coordinateRecovery_.recover(sampled, recovered))
             {
@@ -145,9 +162,12 @@ public:
             {
                 return fail(stage, geometryExtractor_.lastError());
             }
+            float const postprocessMs = elapsedMs(started);
 
             result.task_id = std::filesystem::path(cloudPath).stem().string();
             result.total_points = static_cast<int>(segmentation.size());
+            result.original_points = static_cast<int>(fullCloud.size());
+            result.sampled_points = static_cast<int>(sampled.size());
             result.weld_points = static_cast<int>(geometry.weldPoints);
             result.weld_ratio = geometry.weldRatio;
             if (config_.enable_geometry)
@@ -158,6 +178,12 @@ public:
                 result.length_mm = geometry.lengthMm;
             }
             result.inference_ms = runtime_.lastInferenceDeviceMs();
+            result.load_cloud_ms = loadCloudMs;
+            result.sampling_ms = samplingMs;
+            result.adjacency_build_ms = adjacencyBuildMs;
+            result.inference_wall_ms = inferenceWallMs;
+            result.postprocess_ms = postprocessMs;
+            result.error_recorder_errors = runtime_.errorRecorderErrors();
             result.labels.reserve(segmentation.size());
             for (auto const& point : segmentation) result.labels.push_back(point.label);
 
@@ -188,6 +214,7 @@ public:
                 }
             }
 
+            result.total_ms = elapsedMs(totalStarted);
             result.success = true;
             return WeldStatus::SUCCESS;
         }

@@ -24,6 +24,7 @@ dataset/
 !deployment/postprocess/CMakeLists.txt
 !deployment/weld_sdk/CMakeLists.txt
 !deployment/weld_trt_app/CMakeLists.txt
+!deployment/qt_weld_app/CMakeLists.txt
 
 # Checkpoints and training weights
 *.pth

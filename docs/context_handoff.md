@@ -681,3 +681,51 @@ WELD_DETECTOR_SDK_COMPLETED
 ```
 
 Detailed report: `docs/tensorrt_phase9d_weld_sdk.md`. Stop here; Qt, FP16, INT8, CUDA optimization and additional deployment phases are not started.
+
+## 22. Phase 10A: Qt WeldDetector SDK integration smoke completed
+
+Phase 10A added `deployment/qt_weld_app/`, a minimal Qt Widgets application
+that consumes only the public `ptv2_weld_sdk` API. It does not include or
+access TensorRT/CUDA, Plugin Registry, point-cloud preprocessing or
+post-processing implementation headers.
+
+- Selected Qt: 5.9.1 x64 `msvc2015_64` at
+  `D:\Qt\Qt5.9.1\5.9.1\msvc2015_64`.
+- Build: VS2022 v143 x64 Release PASS; C++17 `/W4 /WX`.
+- Successful evidence:
+  `artifacts/gcn_res_tensorrt/20260723_145741_755831_phase10a_qt_sdk_smoke/`.
+- Runtime deployment: `windeployqt` PASS; Qt Core/Gui/Widgets/Test,
+  `platforms/qwindows.dll`, TensorRT DLLs and CUDA Runtime are present.
+- Worker design: one `WeldDetector` in a dedicated `QThread`, initialized
+  once and reused; concurrent requests are rejected; close performs clean
+  shutdown and `quit()/wait()`.
+- MainWindow control smoke: initialization PASS, UI responsive during
+  detection, two sequential weld_65 detections PASS, clean close PASS.
+- Qt integration smoke: PASS.
+- Fail-closed: 7/7 PASS (missing Engine, missing Plugin, wrong Engine SHA,
+  missing cloud, 2047 points, detection before initialization, second active
+  request).
+- weld_65: 2048 sampled points, 209 weld points, ratio 0.10205078125, PCA
+  length 57.19605255126953 mm, ErrorRecorder zero.
+- Phase 9D centroid/bbox/PCA compatibility maximum error: 0 (`<1e-5`).
+- SDK-only include/source audit: PASS across all Phase 10A sources/tests.
+- Production Engine/Plugin hashes remain
+  `a624601c63e99689fb67a6066ce8a6e346bc42dfa2a885e0f83c74f0ca742299`
+  and
+  `6641ec147e8eac10206a5c60ba1c1390c398d4b59e32a6a618a37046360ec348`.
+
+The backward-compatible SDK result extension exposes the existing original
+and sampled counts, stage timings and ErrorRecorder count required by the UI.
+The Phase 9D regression passed before Qt integration continued. No checkpoint,
+ONNX, Engine, Plugin, sampling, task semantics, precision policy or tolerance
+was changed.
+
+`CANDIDATE_STRICT_NUMERICAL_THRESHOLD_FAILED` remains explicit. No PCL, VTK,
+OpenGL visualization, robot integration, FP16, INT8 or Phase 10B work was
+performed.
+
+```text
+PHASE_10A_QT_SDK_INTEGRATION_SMOKE_COMPLETED
+```
+
+Detailed report: `docs/tensorrt_phase10a_qt_sdk_smoke.md`.

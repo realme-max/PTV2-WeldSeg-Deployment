@@ -67,6 +67,8 @@ int main(int argc, char** argv)
                   << "status=SUCCESS\n"
                   << "task_id=" << result.task_id << '\n'
                   << "total_points=" << result.total_points << '\n'
+                  << "original_points=" << result.original_points << '\n'
+                  << "sampled_points=" << result.sampled_points << '\n'
                   << "weld_points=" << result.weld_points << '\n'
                   << "weld_ratio=" << result.weld_ratio << '\n'
                   << "center=[" << result.center[0] << ',' << result.center[1] << ',' << result.center[2] << "]\n"
@@ -74,6 +76,13 @@ int main(int argc, char** argv)
                   << "bbox_max=[" << result.bbox_max[0] << ',' << result.bbox_max[1] << ',' << result.bbox_max[2] << "]\n"
                   << "length_mm=" << result.length_mm << '\n'
                   << "inference_ms=" << result.inference_ms << '\n'
+                  << "load_cloud_ms=" << result.load_cloud_ms << '\n'
+                  << "sampling_ms=" << result.sampling_ms << '\n'
+                  << "adjacency_build_ms=" << result.adjacency_build_ms << '\n'
+                  << "inference_wall_ms=" << result.inference_wall_ms << '\n'
+                  << "postprocess_ms=" << result.postprocess_ms << '\n'
+                  << "total_ms=" << result.total_ms << '\n'
+                  << "error_recorder_errors=" << result.error_recorder_errors << '\n'
                   << "labels=" << result.labels.size() << '\n'
                   << "WELD_DETECTOR_APP_COMPLETED\n";
         return 0;

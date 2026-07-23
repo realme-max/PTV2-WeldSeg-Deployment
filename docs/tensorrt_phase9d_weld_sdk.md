@@ -67,9 +67,18 @@ struct WeldConfig {
 - `total_points`、`weld_points`、`weld_ratio`
 - `center[3]`、`bbox_min[3]`、`bbox_max[3]`
 - `length_mm`、`inference_ms`
+- `original_points`、`sampled_points`
+- `load_cloud_ms`、`sampling_ms`、`adjacency_build_ms`
+- `inference_wall_ms`、`postprocess_ms`、`total_ms`
+- `error_recorder_errors`
 - `labels`
 
 不公开 logits、TensorRT buffer 或 CUDA pointer。
+
+Phase 10A 前置审计发现 Qt 结果页需要原始/采样点数、分阶段耗时和
+ErrorRecorder 数量，而原 Phase 9D `WeldResult` 未公开这些任务级只读值。
+上述字段因此作为向后兼容的最小扩展加入；既有字段、检测流程、采样、
+标签、几何结果和状态语义均保持不变。
 
 ### WeldStatus
 
