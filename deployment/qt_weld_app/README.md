@@ -1,4 +1,16 @@
-# Qt WeldDetector SDK integration smoke
+# PTV2 Weld Segmentation Qt Application
+
+Phase 10C promotes the Phase 10B visualization smoke into version `0.1.0` of
+a productized Windows demonstration application while retaining the same
+Phase 9D SDK and production Strict-FP32 TensorRT path.
+
+Product facilities include layered QSettings/INI configuration, fail-closed
+Engine/Plugin SHA validation, an explicit state machine, asynchronous atomic
+JSON/PLY/TXT/PNG export, manifest verification, rotating structured logs,
+recent tasks, product/runtime information and a relocatable `windeployqt`
+Release package. See [QUICK_START.md](QUICK_START.md).
+
+## Earlier integration-smoke foundation
 
 This Phase 10A Qt Widgets application depends only on the public `ptv2_weld_sdk` API. A dedicated `WeldDetectionWorker` owns one initialized `WeldDetector` in a `QThread`; the GUI never includes or accesses TensorRT, CUDA, point-cloud preprocessing, or post-processing implementation headers.
 

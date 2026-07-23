@@ -754,3 +754,27 @@ PHASE_10B_QT_POINTCLOUD_VISUALIZATION_COMPLETED
 ```
 
 Detailed report: `docs/tensorrt_phase10b_qt_pointcloud_visualization.md`.
+
+## 24. Phase 10C: Qt application productization completed
+
+Phase 10C promotes the Qt application to `PTV2 Weld Segmentation 0.1.0`.
+It adds layered QSettings configuration, dual Engine/Plugin integrity checks,
+an explicit state machine, background atomic result export, framebuffer PNG
+export, rotating structured logs, recent tasks, runtime information and a
+relocatable Release package.
+
+VS2022 x64 Release and CTest 8/8 passed. A package copied to a new D-drive
+directory outside source/build/artifacts initialized Qt and the Phase 9D SDK
+via relative `launch.bat`, detected package-local `weld_65`, rendered 2048
+points and exported verified JSON/PLY/TXT/PNG plus manifest.
+
+Results remain 209 weld, 1839 background, weld ratio 0.10205078125, PCA length
+57.1960525513 mm and ErrorRecorder zero. Engine/Plugin hashes are unchanged.
+Phase 9D/10A/10B regressions and 15/15 product fail-closed cases passed.
+
+```text
+PHASE_10C_QT_APPLICATION_PRODUCTIZATION_COMPLETED
+```
+
+Evidence:
+`artifacts/gcn_res_tensorrt/20260723_172448_360408_phase10c_qt_productization/`.

@@ -65,4 +65,6 @@ Thumbs.db
 # Build and packaging outputs
 build/
 dist/
+release/
+deployment/qt_weld_app/release/
 *.egg-info/

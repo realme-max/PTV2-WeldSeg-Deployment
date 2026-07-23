@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AppConfig.h"
+#include "AppStateMachine.h"
 #include "QtWeldResultViewModel.h"
 #include "WeldConfig.h"
 
@@ -8,6 +10,7 @@
 #include <QThread>
 
 #include <map>
+#include <memory>
 #include <string>
 
 class QLabel;
@@ -16,12 +19,17 @@ class QPushButton;
 class QCheckBox;
 class QDoubleSpinBox;
 class QTextEdit;
+class QProgressBar;
+class QListWidget;
+class QCloseEvent;
 
 namespace ptv2::qtui
 {
 
 class WeldDetectionWorker;
 class PointCloudView;
+class ApplicationLogger;
+class RecentTaskStore;
 
 class MainWindow final : public QMainWindow
 {
@@ -33,7 +41,19 @@ public:
         QString expectedEngineSha256,
         QString initialCloudPath,
         QWidget* parent = nullptr);
+    MainWindow(
+        AppConfig config,
+        QString initialCloudPath,
+        QString userSettingsPath,
+        QWidget* parent = nullptr);
     ~MainWindow() override;
+    void startProductSmoke(QString exportRoot);
+
+signals:
+    void productSmokeCompleted(bool success, QString exportDirectory, QString error);
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
 
 private slots:
     void browseCloud();
@@ -44,9 +64,19 @@ private slots:
     void onDetectionFailed(QString status, QString message);
     void appendLog(QString message);
     void resetVisualization();
+    void exportResult();
+    void exportScreenshot();
+    void openSettings();
+    void showProductInfo();
+    void loadRecentTask();
 
 private:
     void buildUi();
+    void startWorker();
+    void stopWorker();
+    void setState(AppState state);
+    void refreshRecentTasks();
+    void performExport(QString const& root, bool automated);
     void updateControls();
     void setResult(QString const& key, QString const& value);
     QString normalizedFilePath(QString const& path) const;
@@ -60,10 +90,26 @@ private:
     QTextEdit* logEdit_{nullptr};
     PointCloudView* pointCloudView_{nullptr};
     QPushButton* resetViewButton_{nullptr};
+    QPushButton* exportResultButton_{nullptr};
+    QPushButton* exportScreenshotButton_{nullptr};
+    QPushButton* settingsButton_{nullptr};
+    QPushButton* productInfoButton_{nullptr};
     QCheckBox* showBboxCheck_{nullptr};
     QCheckBox* showPcaCheck_{nullptr};
     QDoubleSpinBox* pointSizeSpin_{nullptr};
+    QProgressBar* progress_{nullptr};
+    QLabel* stateStatus_{nullptr};
+    QListWidget* recentTasks_{nullptr};
     std::map<std::string, QLabel*> resultLabels_;
+    AppConfig appConfig_;
+    QString userSettingsPath_;
+    AppStateMachine stateMachine_;
+    QtWeldResultViewModel lastResult_;
+    bool hasResult_{false};
+    QString smokeExportRoot_;
+    bool smokePending_{false};
+    std::unique_ptr<ApplicationLogger> logger_;
+    std::unique_ptr<RecentTaskStore> recentStore_;
     bool initialized_{false};
     bool detectionActive_{false};
 };

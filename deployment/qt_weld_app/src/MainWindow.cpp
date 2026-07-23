@@ -1,7 +1,13 @@
 #include "MainWindow.h"
 
+#include "ApplicationLogger.h"
+#include "DetectionExportService.h"
 #include "PointCloudRenderData.h"
 #include "PointCloudView.h"
+#include "ProductInfo.h"
+#include "RecentTaskStore.h"
+#include "ScreenshotExportService.h"
+#include "SettingsDialog.h"
 #include "WeldDetectionWorker.h"
 
 #include <QCheckBox>
@@ -11,34 +17,104 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QProgressBar>
 #include <QPushButton>
+#include <QStandardPaths>
+#include <QStatusBar>
 #include <QTextEdit>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QCloseEvent>
 
 #include <utility>
 
 namespace ptv2::qtui
 {
+namespace
+{
+
+AppConfig legacyAppConfig(
+    ptv2::weld::WeldConfig const& config,
+    QString const& engineSha256)
+{
+    AppConfig app = AppConfig::defaults();
+    app.enginePath = QString::fromStdString(config.engine_path);
+    app.pluginPath = QString::fromStdString(config.plugin_path);
+    app.engineSha256 = engineSha256;
+    QString hashError;
+    app.pluginSha256 = AppConfig::sha256File(app.pluginPath, hashError);
+    return app;
+}
+
+} // namespace
 
 MainWindow::MainWindow(
     ptv2::weld::WeldConfig config,
     QString expectedEngineSha256,
     QString initialCloudPath,
     QWidget* parent)
-    : QMainWindow(parent)
+    : MainWindow(
+        legacyAppConfig(config, expectedEngineSha256),
+        std::move(initialCloudPath),
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation))
+            .filePath(QStringLiteral("qt_weld_app.ini")),
+        parent)
+{
+}
+
+MainWindow::MainWindow(
+    AppConfig config,
+    QString initialCloudPath,
+    QString userSettingsPath,
+    QWidget* parent)
+    : QMainWindow(parent),
+      appConfig_(std::move(config)),
+      userSettingsPath_(std::move(userSettingsPath))
 {
     buildUi();
     if (!initialCloudPath.isEmpty())
         cloudPathEdit_->setText(normalizedFilePath(initialCloudPath));
 
-    worker_ = new WeldDetectionWorker(std::move(config), std::move(expectedEngineSha256));
+    logger_ = std::make_unique<ApplicationLogger>();
+    connect(logger_.get(), &ApplicationLogger::lineReady, logEdit_, &QTextEdit::append);
+    QString logError;
+    QString const logPath = QFileInfo(appConfig_.logDirectory).isAbsolute()
+        ? appConfig_.logDirectory
+        : QDir(QFileInfo(userSettingsPath_).absolutePath()).filePath(appConfig_.logDirectory);
+    if (!logger_->initialize(logPath, appConfig_.maximumLogFiles, logError))
+        logEdit_->append(QStringLiteral("[LOGGER FAILED] %1").arg(logError));
+    recentStore_ = std::make_unique<RecentTaskStore>(userSettingsPath_, 20);
+    showBboxCheck_->setChecked(appConfig_.showBoundingBox);
+    showPcaCheck_->setChecked(appConfig_.showPcaDirection);
+    pointSizeSpin_->setValue(appConfig_.pointSize);
+    refreshRecentTasks();
+    setResult(QStringLiteral("engine_integrity"),
+        QStringLiteral("PASS | %1").arg(appConfig_.engineSha256.left(12)));
+    setResult(QStringLiteral("plugin_integrity"),
+        QStringLiteral("PASS | %1").arg(appConfig_.pluginSha256.left(12)));
+    setState(AppState::kInitializing);
+    startWorker();
+    appendLog(QStringLiteral("Product startup; validated Engine=%1 Plugin=%2")
+        .arg(appConfig_.engineSha256.left(12), appConfig_.pluginSha256.left(12)));
+    updateControls();
+}
+
+void MainWindow::startWorker()
+{
+    ptv2::weld::WeldConfig config;
+    config.engine_path = appConfig_.enginePath.toStdString();
+    config.plugin_path = appConfig_.pluginPath.toStdString();
+    worker_ = new WeldDetectionWorker(std::move(config), appConfig_.engineSha256);
     worker_->moveToThread(&workerThread_);
     connect(&workerThread_, &QThread::started, worker_, &WeldDetectionWorker::initialize);
     connect(&workerThread_, &QThread::finished, worker_, &QObject::deleteLater);
@@ -54,10 +130,17 @@ MainWindow::MainWindow(
         this, &MainWindow::appendLog);
     workerThread_.start();
     appendLog(QStringLiteral("Worker thread started; SDK initialization queued"));
-    updateControls();
 }
 
 MainWindow::~MainWindow()
+{
+    QString ignored;
+    stateMachine_.transition(AppState::kShuttingDown, ignored);
+    appendLog(QStringLiteral("Application shutdown requested"));
+    stopWorker();
+}
+
+void MainWindow::stopWorker()
 {
     if (workerThread_.isRunning() && worker_ != nullptr)
         QMetaObject::invokeMethod(worker_, "shutdown", Qt::BlockingQueuedConnection);
@@ -68,7 +151,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::buildUi()
 {
-    setWindowTitle(QStringLiteral("PTV2 WeldDetector SDK Smoke"));
+    setWindowTitle(QStringLiteral("PTV2 Weld Segmentation 0.1.0"));
     resize(1320, 980);
 
     auto* central = new QWidget(this);
@@ -86,9 +169,21 @@ void MainWindow::buildUi()
     browseButton_->setObjectName(QStringLiteral("browseButton"));
     detectButton_ = new QPushButton(QStringLiteral("Detect"), pathRow);
     detectButton_->setObjectName(QStringLiteral("detectButton"));
+    exportResultButton_ = new QPushButton(QStringLiteral("Export Result"), pathRow);
+    exportResultButton_->setObjectName(QStringLiteral("exportResultButton"));
+    exportScreenshotButton_ = new QPushButton(QStringLiteral("Export Screenshot"), pathRow);
+    exportScreenshotButton_->setObjectName(QStringLiteral("exportScreenshotButton"));
+    settingsButton_ = new QPushButton(QStringLiteral("Settings"), pathRow);
+    settingsButton_->setObjectName(QStringLiteral("settingsButton"));
+    productInfoButton_ = new QPushButton(QStringLiteral("Product Info"), pathRow);
+    productInfoButton_->setObjectName(QStringLiteral("productInfoButton"));
     pathLayout->addWidget(cloudPathEdit_, 1);
     pathLayout->addWidget(browseButton_);
     pathLayout->addWidget(detectButton_);
+    pathLayout->addWidget(exportResultButton_);
+    pathLayout->addWidget(exportScreenshotButton_);
+    pathLayout->addWidget(settingsButton_);
+    pathLayout->addWidget(productInfoButton_);
     initializeStatus_ = new QLabel(QStringLiteral("INITIALIZING"), inputGroup);
     initializeStatus_->setObjectName(QStringLiteral("initializeStatus"));
     inputLayout->addRow(QStringLiteral("Cloud TXT"), pathRow);
@@ -154,7 +249,18 @@ void MainWindow::buildUi()
     addResult("postprocess_ms", QStringLiteral("Post-process time (ms)"));
     addResult("total_ms", QStringLiteral("Total time (ms)"));
     addResult("error_recorder_errors", QStringLiteral("ErrorRecorder errors"));
+    addResult("engine_integrity", QStringLiteral("Engine integrity"));
+    addResult("plugin_integrity", QStringLiteral("Plugin integrity"));
     root->addWidget(resultGroup);
+
+    auto* recentGroup = new QGroupBox(QStringLiteral("Recent successful tasks"), central);
+    auto* recentLayout = new QVBoxLayout(recentGroup);
+    recentTasks_ = new QListWidget(recentGroup);
+    recentTasks_->setObjectName(QStringLiteral("recentTasks"));
+    recentLayout->addWidget(recentTasks_);
+    auto* clearHistory = new QPushButton(QStringLiteral("Clear History"), recentGroup);
+    recentLayout->addWidget(clearHistory);
+    root->addWidget(recentGroup);
 
     auto* logGroup = new QGroupBox(QStringLiteral("Runtime log"), central);
     auto* logLayout = new QVBoxLayout(logGroup);
@@ -165,8 +271,30 @@ void MainWindow::buildUi()
     root->addWidget(logGroup, 1);
 
     setCentralWidget(central);
+    stateStatus_ = new QLabel(QStringLiteral("STARTING"), this);
+    progress_ = new QProgressBar(this);
+    progress_->setRange(0, 0);
+    progress_->setMaximumWidth(160);
+    progress_->setVisible(false);
+    statusBar()->addPermanentWidget(stateStatus_);
+    statusBar()->addPermanentWidget(progress_);
     connect(browseButton_, &QPushButton::clicked, this, &MainWindow::browseCloud);
     connect(detectButton_, &QPushButton::clicked, this, &MainWindow::startDetection);
+    connect(exportResultButton_, &QPushButton::clicked, this, &MainWindow::exportResult);
+    connect(exportScreenshotButton_, &QPushButton::clicked, this, &MainWindow::exportScreenshot);
+    connect(settingsButton_, &QPushButton::clicked, this, &MainWindow::openSettings);
+    connect(productInfoButton_, &QPushButton::clicked, this, &MainWindow::showProductInfo);
+    connect(recentTasks_, &QListWidget::itemDoubleClicked, this, &MainWindow::loadRecentTask);
+    connect(clearHistory, &QPushButton::clicked, this, [this] {
+        if (QMessageBox::question(this, QStringLiteral("Clear recent tasks"),
+                QStringLiteral("Clear all locally stored recent-task entries?"))
+            != QMessageBox::Yes)
+            return;
+        QString error;
+        if (!recentStore_ || !recentStore_->clear(error))
+            appendLog(QStringLiteral("Recent task clear failed: %1").arg(error));
+        refreshRecentTasks();
+    });
     connect(resetViewButton_, &QPushButton::clicked, this, &MainWindow::resetVisualization);
     connect(showBboxCheck_, &QCheckBox::toggled, pointCloudView_, &PointCloudView::setShowBoundingBox);
     connect(showPcaCheck_, &QCheckBox::toggled, pointCloudView_, &PointCloudView::setShowPcaDirection);
@@ -188,10 +316,12 @@ QString MainWindow::normalizedFilePath(QString const& path) const
 void MainWindow::browseCloud()
 {
     QString const selected = QFileDialog::getOpenFileName(
-        this, QStringLiteral("Select weld point cloud"), {}, QStringLiteral("Point cloud TXT (*.txt)"));
+        this, QStringLiteral("Select weld point cloud"), appConfig_.defaultCloudDirectory,
+        QStringLiteral("Point cloud TXT (*.txt)"));
     if (selected.isEmpty()) return;
     cloudPathEdit_->setText(normalizedFilePath(selected));
     appendLog(QStringLiteral("Cloud selected: %1").arg(cloudPathEdit_->text()));
+    setState(AppState::kCloudSelected);
     updateControls();
 }
 
@@ -218,6 +348,7 @@ void MainWindow::startDetection()
         return;
     }
     detectionActive_ = true;
+    setState(AppState::kDetecting);
     updateControls();
 }
 
@@ -228,19 +359,39 @@ void MainWindow::onInitializationFinished(QString status, QString message)
     appendLog(message.isEmpty()
         ? QStringLiteral("SDK initialization status: %1").arg(status)
         : QStringLiteral("SDK initialization status: %1; %2").arg(status, message));
-    updateControls();
+    if (initialized_)
+    {
+        setState(AppState::kReady);
+        if (QFileInfo(cloudPathEdit_->text()).isFile())
+            setState(AppState::kCloudSelected);
+    }
+    else
+    {
+        setState(AppState::kConfigurationInvalid);
+        if (smokePending_)
+        {
+            smokePending_ = false;
+            emit productSmokeCompleted(false, {}, message);
+        }
+    }
+    if (initialized_ && smokePending_)
+        QTimer::singleShot(0, this, &MainWindow::startDetection);
 }
 
 void MainWindow::onDetectionStarted(QString cloudPath)
 {
     detectionActive_ = true;
     appendLog(QStringLiteral("Detection started: %1").arg(cloudPath));
+    if (stateMachine_.state() != AppState::kDetecting)
+        setState(AppState::kDetecting);
     updateControls();
 }
 
 void MainWindow::onDetectionSucceeded(QtWeldResultViewModel result)
 {
     detectionActive_ = false;
+    lastResult_ = result;
+    hasResult_ = true;
     PointCloudRenderData const renderData = PointCloudRenderData::fromResult(result);
     QString visualizationError;
     if (!pointCloudView_->setPointCloud(renderData, visualizationError))
@@ -276,7 +427,29 @@ void MainWindow::onDetectionSucceeded(QtWeldResultViewModel result)
     setResult(QStringLiteral("error_recorder_errors"), QString::number(result.errorRecorderErrors));
     appendLog(QStringLiteral("Detection succeeded: weld points=%1, length=%2 mm")
         .arg(result.weldPoints).arg(result.lengthMm, 0, 'g', 10));
-    updateControls();
+    if (recentStore_)
+    {
+        RecentTask task;
+        task.taskId = result.taskId;
+        task.sourceCloud = result.sourcePath;
+        task.timestamp = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+        task.weldPoints = result.weldPoints;
+        task.weldRatio = result.weldRatio;
+        task.lengthMm = result.lengthMm;
+        task.totalMs = result.totalMs;
+        task.status = result.status;
+        QString historyError;
+        if (!recentStore_->add(task, historyError))
+            appendLog(QStringLiteral("Recent task storage failed: %1").arg(historyError));
+        refreshRecentTasks();
+    }
+    setState(AppState::kDetectionSucceeded);
+    if (smokePending_)
+    {
+        QTimer::singleShot(250, this, [this] {
+            performExport(smokeExportRoot_, true);
+        });
+    }
 }
 
 void MainWindow::resetVisualization()
@@ -290,13 +463,44 @@ void MainWindow::onDetectionFailed(QString status, QString message)
     detectionActive_ = false;
     setResult(QStringLiteral("sdk_status"), status);
     appendLog(QStringLiteral("Detection failed: %1: %2").arg(status, message));
-    updateControls();
+    setState(AppState::kDetectionFailed);
+    if (smokePending_)
+    {
+        smokePending_ = false;
+        emit productSmokeCompleted(false, {}, QStringLiteral("%1: %2").arg(status, message));
+    }
 }
 
 void MainWindow::appendLog(QString message)
 {
-    logEdit_->append(QStringLiteral("[%1] %2")
-        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")), message));
+    if (logger_)
+    {
+        QString category = QStringLiteral("Application");
+        if (message.contains(QStringLiteral("startup"), Qt::CaseInsensitive))
+            category = QStringLiteral("Startup");
+        else if (message.contains(QStringLiteral("configuration"), Qt::CaseInsensitive)
+            || message.contains(QStringLiteral("settings"), Qt::CaseInsensitive))
+            category = QStringLiteral("Configuration");
+        else if (message.contains(QStringLiteral("SDK"), Qt::CaseInsensitive)
+            || message.contains(QStringLiteral("worker"), Qt::CaseInsensitive))
+            category = QStringLiteral("SDKInitialization");
+        else if (message.contains(QStringLiteral("Detection"), Qt::CaseInsensitive))
+            category = QStringLiteral("Detection");
+        else if (message.contains(QStringLiteral("Visualization"), Qt::CaseInsensitive))
+            category = QStringLiteral("Visualization");
+        else if (message.contains(QStringLiteral("Export"), Qt::CaseInsensitive)
+            || message.contains(QStringLiteral("Screenshot"), Qt::CaseInsensitive))
+            category = QStringLiteral("Export");
+        else if (message.contains(QStringLiteral("shutdown"), Qt::CaseInsensitive))
+            category = QStringLiteral("Shutdown");
+        logger_->log(message.contains(QStringLiteral("FAILED"), Qt::CaseInsensitive)
+                ? QStringLiteral("ERROR") : QStringLiteral("INFO"),
+            category, message);
+    }
+    else
+        logEdit_->append(QStringLiteral("[%1] %2")
+            .arg(QDateTime::currentDateTime().toString(
+                QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")), message));
 }
 
 void MainWindow::setResult(QString const& key, QString const& value)
@@ -308,8 +512,209 @@ void MainWindow::setResult(QString const& key, QString const& value)
 void MainWindow::updateControls()
 {
     bool const validCloud = QFileInfo(cloudPathEdit_->text()).isFile();
-    browseButton_->setEnabled(!detectionActive_);
-    detectButton_->setEnabled(initialized_ && validCloud && !detectionActive_);
+    browseButton_->setEnabled(stateMachine_.canSelectCloud());
+    detectButton_->setEnabled(initialized_ && stateMachine_.canDetect(validCloud));
+    exportResultButton_->setEnabled(hasResult_ && stateMachine_.canExport());
+    exportScreenshotButton_->setEnabled(hasResult_ && stateMachine_.canExport());
+    settingsButton_->setEnabled(stateMachine_.canOpenSettings());
+    productInfoButton_->setEnabled(stateMachine_.state() != AppState::kShuttingDown);
+    progress_->setVisible(stateMachine_.state() == AppState::kInitializing
+        || stateMachine_.state() == AppState::kDetecting
+        || stateMachine_.state() == AppState::kExporting);
+}
+
+void MainWindow::setState(AppState state)
+{
+    QString error;
+    if (!stateMachine_.transition(state, error))
+    {
+        appendLog(error);
+        return;
+    }
+    stateStatus_->setText(stateMachine_.stateName());
+    statusBar()->showMessage(stateMachine_.stateName());
+    updateControls();
+}
+
+void MainWindow::exportResult()
+{
+    if (!hasResult_ || !stateMachine_.canExport()) return;
+    QString root = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("Select export directory"), appConfig_.defaultExportDirectory);
+    if (root.isEmpty()) return;
+    performExport(root, false);
+}
+
+void MainWindow::performExport(QString const& root, bool automated)
+{
+    setState(AppState::kExporting);
+    DetectionExportIdentity identity;
+    identity.applicationVersion = ProductInfo::applicationVersion();
+    identity.sdkVersion = QStringLiteral("Phase 9D");
+    identity.engineSha256 = appConfig_.engineSha256;
+    identity.pluginSha256 = appConfig_.pluginSha256;
+    QtWeldResultViewModel const resultSnapshot = lastResult_;
+    QImage const screenshot = pointCloudView_->grabFramebuffer();
+    auto* watcher = new QFutureWatcher<DetectionExportResult>(this);
+    connect(watcher, &QFutureWatcher<DetectionExportResult>::finished,
+        this, [this, watcher, automated] {
+            DetectionExportResult const result = watcher->result();
+            watcher->deleteLater();
+            if (!result.success)
+            {
+                appendLog(QStringLiteral("EXPORT_FAILED: %1 (%2)")
+                    .arg(result.error, result.failingFile));
+                setState(AppState::kDetectionFailed);
+                if (automated)
+                {
+                    smokePending_ = false;
+                    emit productSmokeCompleted(false, {}, result.error);
+                }
+                else
+                {
+                    QMessageBox::critical(this, QStringLiteral("Export failed"),
+                        QStringLiteral("EXPORT_FAILED\n%1\nFile: %2")
+                            .arg(result.error, result.failingFile));
+                }
+                return;
+            }
+            appendLog(QStringLiteral("Export succeeded: %1").arg(result.directory));
+            if (recentStore_)
+            {
+                QString historyError;
+                recentStore_->updateExport(lastResult_.taskId, result.directory, historyError);
+                refreshRecentTasks();
+            }
+            setState(AppState::kDetectionSucceeded);
+            if (automated)
+            {
+                smokePending_ = false;
+                emit productSmokeCompleted(true, result.directory, {});
+            }
+        });
+    watcher->setFuture(QtConcurrent::run(
+        [resultSnapshot, screenshot, root, identity] {
+            return DetectionExportService::exportTask(
+                resultSnapshot, screenshot, root, identity);
+        }));
+}
+
+void MainWindow::exportScreenshot()
+{
+    if (!hasResult_ || !stateMachine_.canExport()) return;
+    QString const suggested = QDir(appConfig_.defaultExportDirectory).filePath(
+        QStringLiteral("%1_%2.png").arg(lastResult_.taskId,
+            QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"))));
+    QString const path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Export viewport PNG"), suggested, QStringLiteral("PNG (*.png)"));
+    if (path.isEmpty()) return;
+    ScreenshotExportResult const result =
+        ScreenshotExportService::savePng(pointCloudView_->grabFramebuffer(), path);
+    appendLog(result.success
+        ? QStringLiteral("Screenshot exported: %1 (%2x%3)")
+            .arg(result.path).arg(result.width).arg(result.height)
+        : QStringLiteral("SCREENSHOT_EXPORT_FAILED: %1").arg(result.error));
+}
+
+void MainWindow::openSettings()
+{
+    SettingsDialog dialog(appConfig_, this);
+    if (dialog.exec() != QDialog::Accepted || !dialog.validated()) return;
+    AppConfig const updated = dialog.config();
+    QString saveError;
+    if (!updated.saveUser(userSettingsPath_, saveError))
+    {
+        QMessageBox::critical(this, QStringLiteral("Settings save failed"), saveError);
+        return;
+    }
+    bool const runtimeChanged = updated.enginePath != appConfig_.enginePath
+        || updated.pluginPath != appConfig_.pluginPath
+        || updated.engineSha256 != appConfig_.engineSha256
+        || updated.pluginSha256 != appConfig_.pluginSha256;
+    appConfig_ = updated;
+    showBboxCheck_->setChecked(appConfig_.showBoundingBox);
+    showPcaCheck_->setChecked(appConfig_.showPcaDirection);
+    pointSizeSpin_->setValue(appConfig_.pointSize);
+    if (runtimeChanged)
+    {
+        appendLog(QStringLiteral("Validated runtime settings changed; controlled SDK reinitialization"));
+        initialized_ = false;
+        stopWorker();
+        setState(AppState::kInitializing);
+        startWorker();
+    }
+}
+
+void MainWindow::showProductInfo()
+{
+    QMessageBox::information(this, QStringLiteral("Product Information"),
+        QStringLiteral(
+            "%1\nVersion: %2\nBuild: %3 (%4)\nBuilt: %5\nGit: %6\n"
+            "Qt: %7\nCompiler: %8\nTensorRT: 11.1.0.106\nCUDA Toolkit: 12.8\n"
+            "Engine: %9\nPlugin: %10\nOpenGL: %11\nVendor: %12\nRenderer: %13")
+            .arg(ProductInfo::applicationName())
+            .arg(ProductInfo::applicationVersion())
+            .arg(ProductInfo::buildType())
+            .arg(QStringLiteral("x64"))
+            .arg(ProductInfo::buildTimestamp())
+            .arg(ProductInfo::gitCommit())
+            .arg(QString::fromLatin1(qVersion()))
+            .arg(ProductInfo::compiler())
+            .arg(appConfig_.engineSha256)
+            .arg(appConfig_.pluginSha256)
+            .arg(pointCloudView_->openGLVersion())
+            .arg(pointCloudView_->openGLVendor())
+            .arg(pointCloudView_->openGLRenderer()));
+}
+
+void MainWindow::refreshRecentTasks()
+{
+    if (!recentTasks_ || !recentStore_) return;
+    recentTasks_->clear();
+    QString error;
+    for (RecentTask const& task : recentStore_->load(error))
+    {
+        auto* item = new QListWidgetItem(QStringLiteral("%1 | %2 | weld=%3 | %4")
+            .arg(task.timestamp, task.taskId).arg(task.weldPoints)
+            .arg(task.sourceMissing ? QStringLiteral("SOURCE MISSING") : task.sourceCloud),
+            recentTasks_);
+        item->setData(Qt::UserRole, task.sourceCloud);
+        if (task.sourceMissing) item->setForeground(Qt::red);
+    }
+    if (!error.isEmpty()) appendLog(QStringLiteral("Recent task load failed: %1").arg(error));
+}
+
+void MainWindow::loadRecentTask()
+{
+    if (!recentTasks_->currentItem()) return;
+    QString const source = recentTasks_->currentItem()->data(Qt::UserRole).toString();
+    if (!QFileInfo(source).isFile())
+    {
+        appendLog(QStringLiteral("Recent source is missing: %1").arg(source));
+        return;
+    }
+    cloudPathEdit_->setText(normalizedFilePath(source));
+    setState(AppState::kCloudSelected);
+}
+
+void MainWindow::startProductSmoke(QString exportRoot)
+{
+    smokeExportRoot_ = QFileInfo(exportRoot).absoluteFilePath();
+    smokePending_ = true;
+    appendLog(QStringLiteral("Product deployment smoke armed: %1").arg(smokeExportRoot_));
+    if (initialized_)
+        QTimer::singleShot(0, this, &MainWindow::startDetection);
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    if (stateMachine_.state() == AppState::kExporting)
+    {
+        appendLog(QStringLiteral("Shutdown rejected while export is active"));
+        event->ignore();
+        return;
+    }
+    event->accept();
 }
 
 } // namespace ptv2::qtui

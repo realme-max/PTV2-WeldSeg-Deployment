@@ -23,11 +23,11 @@ find_file(CUDART_RUNTIME_DLL
     REQUIRED
 )
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets OpenGL Test)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets OpenGL Test Concurrent)
 if(NOT DEFINED QT_VERSION_MAJOR)
     set(QT_VERSION_MAJOR 5)
 endif()
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets OpenGL Test)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets OpenGL Test Concurrent)
 
 add_subdirectory(
     "${CMAKE_CURRENT_SOURCE_DIR}/../pointcloud_pipeline"
@@ -53,12 +53,30 @@ add_library(ptv2_weld_qt_frontend STATIC
     include/PointCloudRenderData.h
     include/PointCloudCamera.h
     include/PointCloudView.h
+    include/AppConfig.h
+    include/AppStateMachine.h
+    include/DetectionExportService.h
+    include/ScreenshotExportService.h
+    include/ApplicationLogger.h
+    include/RecentTaskStore.h
+    include/ProductInfo.h
+    include/RuntimePackageValidator.h
+    include/SettingsDialog.h
     src/MainWindow.cpp
     src/WeldDetectionWorker.cpp
     src/QtWeldResultViewModel.cpp
     src/PointCloudRenderData.cpp
     src/PointCloudCamera.cpp
     src/PointCloudView.cpp
+    src/AppConfig.cpp
+    src/AppStateMachine.cpp
+    src/DetectionExportService.cpp
+    src/ScreenshotExportService.cpp
+    src/ApplicationLogger.cpp
+    src/RecentTaskStore.cpp
+    src/ProductInfo.cpp
+    src/RuntimePackageValidator.cpp
+    src/SettingsDialog.cpp
 )
 target_include_directories(ptv2_weld_qt_frontend PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(ptv2_weld_qt_frontend
@@ -66,6 +84,7 @@ target_link_libraries(ptv2_weld_qt_frontend
         ptv2_weld_sdk
         Qt${QT_VERSION_MAJOR}::Widgets
         Qt${QT_VERSION_MAJOR}::OpenGL
+        Qt${QT_VERSION_MAJOR}::Concurrent
 )
 target_compile_definitions(ptv2_weld_qt_frontend PUBLIC NOMINMAX WIN32_LEAN_AND_MEAN)
 
@@ -106,19 +125,47 @@ target_link_libraries(PointCloudViewSmokeTest
         Qt${QT_VERSION_MAJOR}::Test
 )
 
+foreach(product_test
+    AppConfigTest
+    AppStateMachineTest
+    DetectionExportTest
+    RecentTaskStoreTest
+    RuntimePackageSmokeTest)
+    add_executable(${product_test} "tests/${product_test}.cpp")
+    target_link_libraries(${product_test}
+        PRIVATE
+            ptv2_weld_qt_frontend
+            Qt${QT_VERSION_MAJOR}::Widgets
+            Qt${QT_VERSION_MAJOR}::Test
+    )
+endforeach()
+
 if(MSVC)
     target_compile_options(ptv2_weld_qt_frontend PRIVATE /W4 /WX /utf-8)
     target_compile_options(ptv2_weld_qt_smoke PRIVATE /W4 /WX /utf-8)
     target_compile_options(QtSdkIntegrationSmoke PRIVATE /W4 /WX /utf-8)
     target_compile_options(PointCloudRenderDataTest PRIVATE /W4 /WX /utf-8)
     target_compile_options(PointCloudViewSmokeTest PRIVATE /W4 /WX /utf-8)
+    foreach(product_test
+        AppConfigTest
+        AppStateMachineTest
+        DetectionExportTest
+        RecentTaskStoreTest
+        RuntimePackageSmokeTest)
+        target_compile_options(${product_test} PRIVATE /W4 /WX /utf-8)
+    endforeach()
 endif()
 
 foreach(runtime_target
     ptv2_weld_qt_smoke
     QtSdkIntegrationSmoke
     PointCloudRenderDataTest
-    PointCloudViewSmokeTest)
+    PointCloudViewSmokeTest
+    AppConfigTest
+    AppStateMachineTest
+    DetectionExportTest
+    RecentTaskStoreTest
+    RuntimePackageSmokeTest)
     add_custom_command(TARGET ${runtime_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             "${TENSORRT_ROOT}/bin/nvinfer_11.dll"
@@ -134,6 +181,11 @@ foreach(runtime_target
 endforeach()
 
 enable_testing()
+add_test(NAME AppConfigTest COMMAND AppConfigTest)
+add_test(NAME AppStateMachineTest COMMAND AppStateMachineTest)
+add_test(NAME DetectionExportTest COMMAND DetectionExportTest)
+add_test(NAME RecentTaskStoreTest COMMAND RecentTaskStoreTest)
+add_test(NAME RuntimePackageSmokeTest COMMAND RuntimePackageSmokeTest)
 if(DEFINED PTV2_TEST_ENGINE
     AND DEFINED PTV2_TEST_PLUGIN
     AND DEFINED PTV2_TEST_ENGINE_SHA256
