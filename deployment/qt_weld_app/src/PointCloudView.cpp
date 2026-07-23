@@ -1,10 +1,12 @@
 #include "PointCloudView.h"
 
 #include <QElapsedTimer>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QOpenGLContext>
-#include <QPainter>
+#include <QSizePolicy>
 #include <QSurfaceFormat>
+#include <QVBoxLayout>
 #include <QWheelEvent>
 
 #include <algorithm>
@@ -55,8 +57,19 @@ PointCloudView::PointCloudView(QWidget* parent)
     : QOpenGLWidget(parent)
 {
     setObjectName(QStringLiteral("pointCloudView"));
-    setMinimumSize(520, 420);
+    setMinimumSize(400, 300);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     setFocusPolicy(Qt::StrongFocus);
+    emptyStateLabel_ = new QLabel(
+        QStringLiteral("Select a point cloud and run detection"), this);
+    emptyStateLabel_->setObjectName(QStringLiteral("pointCloudEmptyState"));
+    emptyStateLabel_->setAlignment(Qt::AlignCenter);
+    emptyStateLabel_->setAttribute(Qt::WA_TransparentForMouseEvents);
+    emptyStateLabel_->setStyleSheet(QStringLiteral(
+        "QLabel { color: rgb(205, 215, 225); background: transparent; }"));
+    auto* overlayLayout = new QVBoxLayout(this);
+    overlayLayout->setContentsMargins(0, 0, 0, 0);
+    overlayLayout->addWidget(emptyStateLabel_);
 }
 
 PointCloudView::~PointCloudView()
@@ -100,6 +113,7 @@ bool PointCloudView::setPointCloud(PointCloudRenderData const& renderData, QStri
     }
     camera_.fitToBounds(minimum, maximum);
     buffersDirty_ = true;
+    emptyStateLabel_->hide();
     error.clear();
     update();
     return true;
@@ -114,6 +128,7 @@ void PointCloudView::clearPointCloud()
     weldPointCount_ = 0;
     backgroundPointCount_ = 0;
     buffersDirty_ = true;
+    emptyStateLabel_->show();
     update();
 }
 
@@ -158,6 +173,9 @@ int PointCloudView::backgroundPointCount() const noexcept { return backgroundPoi
 unsigned int PointCloudView::lastGlError() const noexcept { return lastGlError_; }
 double PointCloudView::lastUploadMs() const noexcept { return lastUploadMs_; }
 double PointCloudView::lastPaintMs() const noexcept { return lastPaintMs_; }
+quint64 PointCloudView::bufferUploadCount() const noexcept { return bufferUploadCount_; }
+quint64 PointCloudView::resizeGlCount() const noexcept { return resizeGlCount_; }
+float PointCloudView::aspectRatio() const noexcept { return aspectRatio_; }
 QString PointCloudView::openGLVersion() const { return glVersion_; }
 QString PointCloudView::openGLRenderer() const { return glRenderer_; }
 QString PointCloudView::openGLVendor() const { return glVendor_; }
@@ -205,7 +223,11 @@ void PointCloudView::initializeGL()
 
 void PointCloudView::resizeGL(int width, int height)
 {
-    glViewport(0, 0, width, height);
+    int const safeWidth = std::max(width, 1);
+    int const safeHeight = std::max(height, 1);
+    glViewport(0, 0, safeWidth, safeHeight);
+    aspectRatio_ = static_cast<float>(safeWidth) / static_cast<float>(safeHeight);
+    ++resizeGlCount_;
 }
 
 void PointCloudView::paintGL()
@@ -219,8 +241,8 @@ void PointCloudView::paintGL()
         return;
     }
     if (buffersDirty_) uploadPendingBuffers();
-    float const aspect = height() > 0 ? static_cast<float>(width()) / static_cast<float>(height()) : 1.0F;
-    QMatrix4x4 const mvp = camera_.projectionMatrix(aspect) * camera_.viewMatrix();
+    QMatrix4x4 const mvp =
+        camera_.projectionMatrix(aspectRatio_) * camera_.viewMatrix();
     program_.bind();
     program_.setUniformValue("mvp", mvp);
     drawBuffer(pointsBuffer_, pointVertices_.size(), GL_POINTS, pointSize_);
@@ -230,13 +252,6 @@ void PointCloudView::paintGL()
     lastGlError_ = glGetError();
     lastPaintMs_ = static_cast<double>(timer.nsecsElapsed()) / 1.0e6;
 
-    if (data_.points.isEmpty())
-    {
-        QPainter painter(this);
-        painter.setPen(QColor(205, 215, 225));
-        painter.drawText(rect(), Qt::AlignCenter,
-            QStringLiteral("Select a point cloud and run detection"));
-    }
 }
 
 void PointCloudView::mousePressEvent(QMouseEvent* event)
@@ -364,6 +379,7 @@ void PointCloudView::uploadPendingBuffers()
     upload(linesBuffer_, lineVertices_);
     upload(centerBuffer_, centerVertices_);
     buffersDirty_ = false;
+    ++bufferUploadCount_;
     lastUploadMs_ = static_cast<double>(timer.nsecsElapsed()) / 1.0e6;
 }
 

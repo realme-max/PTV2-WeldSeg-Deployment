@@ -25,17 +25,25 @@
 #include <QListWidget>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QScrollArea>
+#include <QSettings>
+#include <QSizePolicy>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QStatusBar>
-#include <QTextEdit>
+#include <QTextDocument>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtConcurrent/QtConcurrentRun>
 #include <QCloseEvent>
 
+#include <algorithm>
 #include <utility>
 
 namespace ptv2::qtui
@@ -82,17 +90,19 @@ MainWindow::MainWindow(
       userSettingsPath_(std::move(userSettingsPath))
 {
     buildUi();
+    restoreWindowLayout();
     if (!initialCloudPath.isEmpty())
         cloudPathEdit_->setText(normalizedFilePath(initialCloudPath));
 
     logger_ = std::make_unique<ApplicationLogger>();
-    connect(logger_.get(), &ApplicationLogger::lineReady, logEdit_, &QTextEdit::append);
+    connect(logger_.get(), &ApplicationLogger::lineReady,
+        logEdit_, &QPlainTextEdit::appendPlainText);
     QString logError;
     QString const logPath = QFileInfo(appConfig_.logDirectory).isAbsolute()
         ? appConfig_.logDirectory
         : QDir(QFileInfo(userSettingsPath_).absolutePath()).filePath(appConfig_.logDirectory);
     if (!logger_->initialize(logPath, appConfig_.maximumLogFiles, logError))
-        logEdit_->append(QStringLiteral("[LOGGER FAILED] %1").arg(logError));
+        logEdit_->appendPlainText(QStringLiteral("[LOGGER FAILED] %1").arg(logError));
     recentStore_ = std::make_unique<RecentTaskStore>(userSettingsPath_, 20);
     showBboxCheck_->setChecked(appConfig_.showBoundingBox);
     showPcaCheck_->setChecked(appConfig_.showPcaDirection);
@@ -151,10 +161,12 @@ void MainWindow::stopWorker()
 
 void MainWindow::buildUi()
 {
-    setWindowTitle(QStringLiteral("PTV2 Weld Segmentation 0.1.0"));
-    resize(1320, 980);
+    setWindowTitle(QStringLiteral("%1 %2")
+        .arg(ProductInfo::applicationName(), ProductInfo::applicationVersion()));
+    resize(1200, 760);
 
     auto* central = new QWidget(this);
+    central->setObjectName(QStringLiteral("centralWidget"));
     auto* root = new QVBoxLayout(central);
 
     auto* inputGroup = new QGroupBox(QStringLiteral("Input and SDK initialization"), central);
@@ -179,18 +191,26 @@ void MainWindow::buildUi()
     productInfoButton_->setObjectName(QStringLiteral("productInfoButton"));
     pathLayout->addWidget(cloudPathEdit_, 1);
     pathLayout->addWidget(browseButton_);
-    pathLayout->addWidget(detectButton_);
-    pathLayout->addWidget(exportResultButton_);
-    pathLayout->addWidget(exportScreenshotButton_);
-    pathLayout->addWidget(settingsButton_);
-    pathLayout->addWidget(productInfoButton_);
     initializeStatus_ = new QLabel(QStringLiteral("INITIALIZING"), inputGroup);
     initializeStatus_->setObjectName(QStringLiteral("initializeStatus"));
+    auto* actionRow = new QWidget(inputGroup);
+    actionRow->setObjectName(QStringLiteral("actionRow"));
+    auto* actionLayout = new QHBoxLayout(actionRow);
+    actionLayout->setContentsMargins(0, 0, 0, 0);
+    actionLayout->addWidget(detectButton_);
+    actionLayout->addWidget(exportResultButton_);
+    actionLayout->addWidget(exportScreenshotButton_);
+    actionLayout->addWidget(settingsButton_);
+    actionLayout->addWidget(productInfoButton_);
+    actionLayout->addStretch(1);
     inputLayout->addRow(QStringLiteral("Cloud TXT"), pathRow);
+    inputLayout->addRow(QStringLiteral("Actions"), actionRow);
     inputLayout->addRow(QStringLiteral("Initialize status"), initializeStatus_);
     root->addWidget(inputGroup);
 
     auto* visualizationGroup = new QGroupBox(QStringLiteral("Segmented point cloud"), central);
+    visualizationGroup->setObjectName(QStringLiteral("visualizationGroup"));
+    visualizationGroup->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     auto* visualizationLayout = new QVBoxLayout(visualizationGroup);
     auto* visualizationControls = new QHBoxLayout();
     resetViewButton_ = new QPushButton(QStringLiteral("Reset View"), visualizationGroup);
@@ -220,13 +240,24 @@ void MainWindow::buildUi()
     visualizationLayout->addLayout(visualizationControls);
     visualizationLayout->addWidget(legend);
     visualizationLayout->addWidget(pointCloudView_, 1);
-    root->addWidget(visualizationGroup, 2);
 
-    auto* resultGroup = new QGroupBox(QStringLiteral("Weld detection result"), central);
+    auto* rightContent = new QWidget();
+    rightContent->setObjectName(QStringLiteral("rightScrollContent"));
+    rightContent->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    auto* rightContentLayout = new QVBoxLayout(rightContent);
+    rightContentLayout->setAlignment(Qt::AlignTop);
+
+    auto* resultGroup = new QGroupBox(QStringLiteral("Weld detection result"), rightContent);
+    resultGroup->setObjectName(QStringLiteral("resultGroup"));
     auto* resultLayout = new QFormLayout(resultGroup);
+    resultLayout->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    resultLayout->setRowWrapPolicy(QFormLayout::WrapLongRows);
     auto addResult = [&](char const* key, QString const& label) {
         auto* value = new QLabel(QStringLiteral("-"), resultGroup);
         value->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        value->setWordWrap(true);
+        value->setMinimumWidth(0);
+        value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         value->setObjectName(QString::fromLatin1(key));
         resultLabels_.emplace(key, value);
         resultLayout->addRow(label, value);
@@ -251,24 +282,53 @@ void MainWindow::buildUi()
     addResult("error_recorder_errors", QStringLiteral("ErrorRecorder errors"));
     addResult("engine_integrity", QStringLiteral("Engine integrity"));
     addResult("plugin_integrity", QStringLiteral("Plugin integrity"));
-    root->addWidget(resultGroup);
+    rightContentLayout->addWidget(resultGroup);
 
-    auto* recentGroup = new QGroupBox(QStringLiteral("Recent successful tasks"), central);
+    auto* recentGroup = new QGroupBox(QStringLiteral("Recent successful tasks"), rightContent);
+    recentGroup->setObjectName(QStringLiteral("recentTasksGroup"));
     auto* recentLayout = new QVBoxLayout(recentGroup);
     recentTasks_ = new QListWidget(recentGroup);
     recentTasks_->setObjectName(QStringLiteral("recentTasks"));
+    recentTasks_->setMinimumHeight(120);
+    recentTasks_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    recentTasks_->setTextElideMode(Qt::ElideMiddle);
     recentLayout->addWidget(recentTasks_);
     auto* clearHistory = new QPushButton(QStringLiteral("Clear History"), recentGroup);
     recentLayout->addWidget(clearHistory);
-    root->addWidget(recentGroup);
+    rightContentLayout->addWidget(recentGroup);
 
-    auto* logGroup = new QGroupBox(QStringLiteral("Runtime log"), central);
+    auto* logGroup = new QGroupBox(QStringLiteral("Runtime log"), rightContent);
+    logGroup->setObjectName(QStringLiteral("runtimeLogGroup"));
     auto* logLayout = new QVBoxLayout(logGroup);
-    logEdit_ = new QTextEdit(logGroup);
+    logEdit_ = new QPlainTextEdit(logGroup);
     logEdit_->setObjectName(QStringLiteral("runtimeLog"));
     logEdit_->setReadOnly(true);
+    logEdit_->setMinimumHeight(160);
+    logEdit_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    logEdit_->document()->setMaximumBlockCount(2000);
     logLayout->addWidget(logEdit_);
-    root->addWidget(logGroup, 1);
+    rightContentLayout->addWidget(logGroup);
+    rightContentLayout->addStretch(1);
+
+    rightScrollArea_ = new QScrollArea(central);
+    rightScrollArea_->setObjectName(QStringLiteral("rightScrollArea"));
+    rightScrollArea_->setWidgetResizable(true);
+    rightScrollArea_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    rightScrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    rightScrollArea_->setFrameShape(QFrame::StyledPanel);
+    rightScrollArea_->setMinimumWidth(280);
+    rightScrollArea_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    rightScrollArea_->setWidget(rightContent);
+
+    mainContentSplitter_ = new QSplitter(Qt::Horizontal, central);
+    mainContentSplitter_->setObjectName(QStringLiteral("mainContentSplitter"));
+    mainContentSplitter_->setChildrenCollapsible(false);
+    mainContentSplitter_->addWidget(visualizationGroup);
+    mainContentSplitter_->addWidget(rightScrollArea_);
+    mainContentSplitter_->setStretchFactor(0, 3);
+    mainContentSplitter_->setStretchFactor(1, 1);
+    mainContentSplitter_->setSizes(QList<int>() << 880 << 320);
+    root->addWidget(mainContentSplitter_, 1);
 
     setCentralWidget(central);
     stateStatus_ = new QLabel(QStringLiteral("STARTING"), this);
@@ -498,7 +558,7 @@ void MainWindow::appendLog(QString message)
             category, message);
     }
     else
-        logEdit_->append(QStringLiteral("[%1] %2")
+        logEdit_->appendPlainText(QStringLiteral("[%1] %2")
             .arg(QDateTime::currentDateTime().toString(
                 QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")), message));
 }
@@ -506,7 +566,11 @@ void MainWindow::appendLog(QString message)
 void MainWindow::setResult(QString const& key, QString const& value)
 {
     auto const found = resultLabels_.find(key.toStdString());
-    if (found != resultLabels_.end()) found->second->setText(value);
+    if (found != resultLabels_.end())
+    {
+        found->second->setText(value);
+        found->second->setToolTip(value);
+    }
 }
 
 void MainWindow::updateControls()
@@ -714,7 +778,64 @@ void MainWindow::closeEvent(QCloseEvent* event)
         event->ignore();
         return;
     }
+    saveWindowLayout();
     event->accept();
+}
+
+bool MainWindow::geometryHasVisibleArea(QRect const& geometry) const
+{
+    constexpr int kRequiredVisibleWidth = 160;
+    constexpr int kRequiredVisibleHeight = 100;
+    for (QScreen* screen : QGuiApplication::screens())
+    {
+        QRect const visible = geometry.intersected(screen->availableGeometry());
+        if (visible.width() >= kRequiredVisibleWidth
+            && visible.height() >= kRequiredVisibleHeight)
+            return true;
+    }
+    return false;
+}
+
+void MainWindow::applySafeDefaultGeometry()
+{
+    QScreen* screen = QGuiApplication::primaryScreen();
+    QRect const available = screen != nullptr
+        ? screen->availableGeometry()
+        : QRect(0, 0, 1200, 760);
+    QSize const target(
+        std::max(520, std::min(1200, available.width() - 80)),
+        std::max(420, std::min(760, available.height() - 80)));
+    resize(target);
+    move(available.center() - rect().center());
+}
+
+void MainWindow::restoreWindowLayout()
+{
+    if (!appConfig_.rememberWindowGeometry || userSettingsPath_.isEmpty())
+    {
+        applySafeDefaultGeometry();
+        return;
+    }
+    QSettings settings(userSettingsPath_, QSettings::IniFormat);
+    QByteArray const geometry = settings.value(QStringLiteral("Window/geometry")).toByteArray();
+    bool const restored = !geometry.isEmpty() && restoreGeometry(geometry);
+    if (!restored || !geometryHasVisibleArea(frameGeometry()))
+        applySafeDefaultGeometry();
+    QByteArray const splitter =
+        settings.value(QStringLiteral("Window/main_splitter")).toByteArray();
+    if (!splitter.isEmpty() && mainContentSplitter_ != nullptr)
+        mainContentSplitter_->restoreState(splitter);
+}
+
+void MainWindow::saveWindowLayout()
+{
+    if (!appConfig_.rememberWindowGeometry || userSettingsPath_.isEmpty()) return;
+    QSettings settings(userSettingsPath_, QSettings::IniFormat);
+    settings.setValue(QStringLiteral("Window/geometry"), saveGeometry());
+    if (mainContentSplitter_ != nullptr)
+        settings.setValue(
+            QStringLiteral("Window/main_splitter"), mainContentSplitter_->saveState());
+    settings.sync();
 }
 
 } // namespace ptv2::qtui

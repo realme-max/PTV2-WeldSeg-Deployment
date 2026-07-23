@@ -1,14 +1,20 @@
 # PTV2 Weld Segmentation Qt Application
 
-Phase 10C promotes the Phase 10B visualization smoke into version `0.1.0` of
-a productized Windows demonstration application while retaining the same
-Phase 9D SDK and production Strict-FP32 TensorRT path.
+Phase 10C.1 updates the productized Windows demonstration application to
+version `0.1.1` while retaining the same Phase 9D SDK and production
+Strict-FP32 TensorRT path.
 
 Product facilities include layered QSettings/INI configuration, fail-closed
 Engine/Plugin SHA validation, an explicit state machine, asynchronous atomic
 JSON/PLY/TXT/PNG export, manifest verification, rotating structured logs,
 recent tasks, product/runtime information and a relocatable `windeployqt`
 Release package. See [QUICK_START.md](QUICK_START.md).
+
+The main workspace uses a horizontal splitter: the OpenGL visualization stays
+expanding on the left, while result, integrity, history and log content is
+inside a vertically scrollable right panel. Continuous window resizing only
+updates the OpenGL viewport/projection state; point data and GPU buffers are
+not rebuilt during resize.
 
 ## Earlier integration-smoke foundation
 

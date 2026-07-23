@@ -67,4 +67,7 @@ build/
 dist/
 release/
 deployment/qt_weld_app/release/
+*.exe
+*.dll
+*.pdb
 *.egg-info/

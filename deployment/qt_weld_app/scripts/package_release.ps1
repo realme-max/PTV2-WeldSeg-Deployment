@@ -6,13 +6,23 @@ param(
     [Parameter(Mandatory = $true)][string]$QtRoot,
     [Parameter(Mandatory = $true)][string]$TensorRTRoot,
     [Parameter(Mandatory = $true)][string]$CudaRoot,
-    [Parameter(Mandatory = $true)][string]$OutputRoot
+    [Parameter(Mandatory = $true)][string]$OutputRoot,
+    [string]$PackageName = "",
+    [string]$SampleCloudPath = ""
 )
 
 $ErrorActionPreference = "Stop"
-$version = "0.1.0"
+$version = "0.1.1"
 $resolvedOutputRoot = [IO.Path]::GetFullPath($OutputRoot).TrimEnd("\")
-$packageRoot = Join-Path $resolvedOutputRoot "PTV2_Weld_App_$version"
+$resolvedPackageName = if ([string]::IsNullOrWhiteSpace($PackageName)) {
+    "PTV2_Weld_App_$version"
+} else {
+    $PackageName.Trim()
+}
+if ($resolvedPackageName -ne [IO.Path]::GetFileName($resolvedPackageName)) {
+    throw "UNSAFE_PACKAGE_NAME: $resolvedPackageName"
+}
+$packageRoot = Join-Path $resolvedOutputRoot $resolvedPackageName
 if ([IO.Path]::GetDirectoryName($packageRoot).TrimEnd("\") -ne $resolvedOutputRoot) {
     throw "UNSAFE_PACKAGE_TARGET: $packageRoot"
 }
@@ -28,6 +38,9 @@ $required = @(
     (Join-Path $TensorRTRoot "bin\nvinfer_plugin_11.dll"),
     (Join-Path $CudaRoot "bin\cudart64_12.dll")
 )
+if (-not [string]::IsNullOrWhiteSpace($SampleCloudPath)) {
+    $required += $SampleCloudPath
+}
 foreach ($path in $required) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "PACKAGE_REQUIRED_DEPENDENCY_MISSING: $path"
@@ -38,7 +51,7 @@ if (Test-Path -LiteralPath $packageRoot) {
     Remove-Item -LiteralPath $packageRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $packageRoot | Out-Null
-@("config", "engine", "plugins", "logs", "exports") | ForEach-Object {
+@("config", "engine", "plugins", "logs", "exports", "sample") | ForEach-Object {
     New-Item -ItemType Directory -Path (Join-Path $packageRoot $_) | Out-Null
 }
 
@@ -50,6 +63,10 @@ Copy-Item -LiteralPath $PluginPath -Destination (
 Copy-Item -LiteralPath (Join-Path $TensorRTRoot "bin\nvinfer_11.dll") -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $TensorRTRoot "bin\nvinfer_plugin_11.dll") -Destination $packageRoot
 Copy-Item -LiteralPath (Join-Path $CudaRoot "bin\cudart64_12.dll") -Destination $packageRoot
+if (-not [string]::IsNullOrWhiteSpace($SampleCloudPath)) {
+    Copy-Item -LiteralPath $SampleCloudPath -Destination (
+        Join-Path $packageRoot "sample\weld_65.txt")
+}
 
 & $windeployqt --release --no-translations --no-system-d3d-compiler `
     --dir $packageRoot (Join-Path $packageRoot "ptv2_weld_qt.exe")
@@ -99,13 +116,14 @@ exit /b %EXIT_CODE%
 Set-Content -LiteralPath (Join-Path $packageRoot "launch.bat") -Value $launcher -Encoding ASCII
 
 $readme = @"
-PTV2 Weld Segmentation 0.1.0
+PTV2 Weld Segmentation 0.1.1
 
 Launch: double-click launch.bat
 Requirements: NVIDIA RTX 5060-compatible driver and Windows x64.
 The Engine and VoxelUniqueCub Plugin are package-local and validated by SHA-256.
 Input: weld point-cloud TXT with x y z label columns and at least 2048 valid points.
 Labels: class 0 = weld_seam; class 1 = background.
+Sample: sample\weld_65.txt (when included by the qualification package).
 "@
 Set-Content -LiteralPath (Join-Path $packageRoot "README.txt") -Value $readme -Encoding UTF8
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\QUICK_START.md") `

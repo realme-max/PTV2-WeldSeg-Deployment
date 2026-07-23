@@ -1,4 +1,4 @@
-# PTV2 Weld Segmentation 0.1.0 — Quick Start
+# PTV2 Weld Segmentation 0.1.1 — Quick Start
 
 ## Run the packaged application
 
@@ -17,6 +17,10 @@ production SHA-256 identities before SDK initialization.
 
 Each successful export contains `weld_result.json`, `weld_points.ply`,
 `prediction.txt`, `detection_view.png` and `task_manifest.json`.
+
+The visualization and the right information panel are separated by a movable
+splitter. When the window is short, use the right-side vertical scrollbar to
+reach detection, integrity, history and log sections.
 
 Runtime requirements are Windows x64, a compatible NVIDIA driver and an NVIDIA
 GPU. Qt, TensorRT/CUDA runtime files, Engine and VoxelUniqueCub Plugin are

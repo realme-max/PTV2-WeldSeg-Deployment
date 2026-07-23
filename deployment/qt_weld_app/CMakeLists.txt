@@ -125,6 +125,16 @@ target_link_libraries(PointCloudViewSmokeTest
         Qt${QT_VERSION_MAJOR}::Test
 )
 
+add_executable(QtLayoutResizeStabilityTest tests/QtLayoutResizeStabilityTest.cpp)
+target_link_libraries(QtLayoutResizeStabilityTest
+    PRIVATE
+        ptv2_weld_qt_frontend
+        ptv2_weld_sdk
+        Qt${QT_VERSION_MAJOR}::Widgets
+        Qt${QT_VERSION_MAJOR}::OpenGL
+        Qt${QT_VERSION_MAJOR}::Test
+)
+
 foreach(product_test
     AppConfigTest
     AppStateMachineTest
@@ -146,6 +156,7 @@ if(MSVC)
     target_compile_options(QtSdkIntegrationSmoke PRIVATE /W4 /WX /utf-8)
     target_compile_options(PointCloudRenderDataTest PRIVATE /W4 /WX /utf-8)
     target_compile_options(PointCloudViewSmokeTest PRIVATE /W4 /WX /utf-8)
+    target_compile_options(QtLayoutResizeStabilityTest PRIVATE /W4 /WX /utf-8)
     foreach(product_test
         AppConfigTest
         AppStateMachineTest
@@ -161,6 +172,7 @@ foreach(runtime_target
     QtSdkIntegrationSmoke
     PointCloudRenderDataTest
     PointCloudViewSmokeTest
+    QtLayoutResizeStabilityTest
     AppConfigTest
     AppStateMachineTest
     DetectionExportTest
@@ -192,6 +204,7 @@ if(DEFINED PTV2_TEST_ENGINE
     AND DEFINED PTV2_TEST_CLOUD
     AND DEFINED PTV2_TEST_SMALL_CLOUD
     AND DEFINED PTV2_TEST_ARTIFACT_DIR)
+    file(SHA256 "${PTV2_TEST_PLUGIN}" PTV2_TEST_PLUGIN_SHA256)
     add_test(
         NAME QtSdkIntegrationSmoke
         COMMAND QtSdkIntegrationSmoke
@@ -217,5 +230,15 @@ if(DEFINED PTV2_TEST_ENGINE
             --plugin "${PTV2_TEST_PLUGIN}"
             --cloud "${PTV2_TEST_CLOUD}"
             --output "${PTV2_TEST_ARTIFACT_DIR}/opengl_widget_smoke.json"
+    )
+    add_test(
+        NAME QtLayoutResizeStabilityTest
+        COMMAND QtLayoutResizeStabilityTest
+            --engine "${PTV2_TEST_ENGINE}"
+            --trt-plugin "${PTV2_TEST_PLUGIN}"
+            --engine-sha256 "${PTV2_TEST_ENGINE_SHA256}"
+            --plugin-sha256 "${PTV2_TEST_PLUGIN_SHA256}"
+            --cloud "${PTV2_TEST_CLOUD}"
+            --artifact-dir "${PTV2_TEST_ARTIFACT_DIR}"
     )
 endif()

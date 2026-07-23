@@ -18,10 +18,13 @@ class QLineEdit;
 class QPushButton;
 class QCheckBox;
 class QDoubleSpinBox;
-class QTextEdit;
+class QPlainTextEdit;
 class QProgressBar;
 class QListWidget;
 class QCloseEvent;
+class QScrollArea;
+class QSplitter;
+class QRect;
 
 namespace ptv2::qtui
 {
@@ -80,6 +83,10 @@ private:
     void updateControls();
     void setResult(QString const& key, QString const& value);
     QString normalizedFilePath(QString const& path) const;
+    void restoreWindowLayout();
+    void saveWindowLayout();
+    void applySafeDefaultGeometry();
+    bool geometryHasVisibleArea(QRect const& geometry) const;
 
     QThread workerThread_;
     WeldDetectionWorker* worker_{nullptr};
@@ -87,8 +94,10 @@ private:
     QPushButton* browseButton_{nullptr};
     QPushButton* detectButton_{nullptr};
     QLabel* initializeStatus_{nullptr};
-    QTextEdit* logEdit_{nullptr};
+    QPlainTextEdit* logEdit_{nullptr};
     PointCloudView* pointCloudView_{nullptr};
+    QScrollArea* rightScrollArea_{nullptr};
+    QSplitter* mainContentSplitter_{nullptr};
     QPushButton* resetViewButton_{nullptr};
     QPushButton* exportResultButton_{nullptr};
     QPushButton* exportScreenshotButton_{nullptr};

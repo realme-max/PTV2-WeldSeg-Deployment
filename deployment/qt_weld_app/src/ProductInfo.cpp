@@ -4,7 +4,7 @@ namespace ptv2::qtui
 {
 
 QString ProductInfo::applicationName() { return QStringLiteral("PTV2 Weld Segmentation"); }
-QString ProductInfo::applicationVersion() { return QStringLiteral("0.1.0"); }
+QString ProductInfo::applicationVersion() { return QStringLiteral("0.1.1"); }
 
 QString ProductInfo::buildType()
 {

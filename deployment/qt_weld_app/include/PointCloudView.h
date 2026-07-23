@@ -10,6 +10,9 @@
 #include <QOpenGLWidget>
 #include <QPoint>
 #include <QString>
+#include <QtGlobal>
+
+class QLabel;
 
 namespace ptv2::qtui
 {
@@ -48,6 +51,9 @@ public:
     unsigned int lastGlError() const noexcept;
     double lastUploadMs() const noexcept;
     double lastPaintMs() const noexcept;
+    quint64 bufferUploadCount() const noexcept;
+    quint64 resizeGlCount() const noexcept;
+    float aspectRatio() const noexcept;
     QString openGLVersion() const;
     QString openGLRenderer() const;
     QString openGLVendor() const;
@@ -82,6 +88,7 @@ private:
     QOpenGLBuffer pointsBuffer_{QOpenGLBuffer::VertexBuffer};
     QOpenGLBuffer linesBuffer_{QOpenGLBuffer::VertexBuffer};
     QOpenGLBuffer centerBuffer_{QOpenGLBuffer::VertexBuffer};
+    QLabel* emptyStateLabel_{nullptr};
     QVector<Vertex> pointVertices_;
     QVector<Vertex> lineVertices_;
     QVector<Vertex> centerVertices_;
@@ -102,6 +109,9 @@ private:
     unsigned int lastGlError_{0};
     double lastUploadMs_{0.0};
     double lastPaintMs_{0.0};
+    quint64 bufferUploadCount_{0};
+    quint64 resizeGlCount_{0};
+    float aspectRatio_{1.0F};
 };
 
 } // namespace ptv2::qtui

@@ -778,3 +778,40 @@ PHASE_10C_QT_APPLICATION_PRODUCTIZATION_COMPLETED
 
 Evidence:
 `artifacts/gcn_res_tensorrt/20260723_172448_360408_phase10c_qt_productization/`.
+
+## 25. Phase 10C.1: Qt layout, scrolling and resize stability completed
+
+Phase 10C.1 updates the product application to version `0.1.1`. The original
+single vertical page had no scroll area and propagated the combined minimum
+height of the OpenGL view, 20-row result form, history and log to the main
+window. The new layout keeps the input row above a horizontal splitter, with
+the expanding OpenGL view on the left and a real vertically scrollable
+result/integrity/history/log panel on the right.
+
+`PointCloudView::resizeGL()` now guards zero dimensions and stores a finite
+aspect ratio. Resize does not reset the camera or rebuild/upload render data.
+The empty-state text moved out of `paintGL()` into a transparent child label.
+The visible log is a bounded `QPlainTextEdit`. Window and splitter state are
+persisted, and invalid/off-screen geometry falls back to a visible default.
+
+VS2022 x64 Release `/W4 /WX` and CTest 9/9 passed. The new layout test observed
+a right scroll maximum of 651, no horizontal scrolling, 135 resize operations,
+a maximum UI heartbeat delay of 41 ms, no resize-triggered VBO upload, 2048
+rendered points, finite preserved camera state and OpenGL error zero. Detection
+and export passed while resizing, and a second detection also completed during
+resize.
+
+Qualified package:
+`D:\PTV2_Weld_App_0.1.1_Phase10C1_QUALIFIED_20260723_184946`.
+Package-local `launch.bat` detection/export passed; checksums and Engine/Plugin
+hashes remained unchanged.
+
+```text
+PHASE_10C1_QT_LAYOUT_SCROLL_RESIZE_STABILITY_COMPLETED
+```
+
+Evidence:
+`artifacts/gcn_res_tensorrt/20260723_184946_689058_phase10c1_qt_layout_resize_stability/`.
+
+Detailed report:
+`docs/tensorrt_phase10c1_qt_layout_resize_stability.md`.
